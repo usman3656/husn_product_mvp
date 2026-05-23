@@ -1,8 +1,9 @@
 import { ApiHealth } from "@/components/api-health";
+import { GraphCard } from "@/components/graph-card";
+import { SlackPanel } from "@/components/slack-panel";
 import { SourcePanel } from "@/components/source-panel";
 
-const SOURCES = [
-  { key: "slack", label: "Slack" },
+const OTHER_SOURCES = [
   { key: "jira", label: "Jira" },
   { key: "google", label: "Google (Gmail + Drive)" },
   { key: "microsoft", label: "Microsoft (Outlook + Teams + SharePoint)" },
@@ -18,12 +19,17 @@ export default function Home() {
         </p>
       </header>
 
-      <section className="mb-10">
+      <section className="mb-6">
         <ApiHealth />
       </section>
 
+      <section className="mb-8">
+        <GraphCard />
+      </section>
+
       <section className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        {SOURCES.map((s) => (
+        <SlackPanel />
+        {OTHER_SOURCES.map((s) => (
           <SourcePanel key={s.key} sourceKey={s.key} label={s.label} />
         ))}
       </section>

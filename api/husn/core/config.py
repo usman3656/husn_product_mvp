@@ -15,6 +15,17 @@ class Settings(BaseSettings):
     api_host: str = "0.0.0.0"
     api_port: int = 8000
 
+    session_secret: str = "dev-only-not-secret-rotate-me"
+
+    jira_client_id: str = ""
+    jira_client_secret: str = ""
+    jira_redirect_uri: str = "http://localhost:8000/auth/jira/callback"
+
+    slack_client_id: str = ""
+    slack_client_secret: str = ""
+    slack_signing_secret: str = ""
+    slack_redirect_uri: str = "http://localhost:8000/auth/slack/callback"
+
 
 @lru_cache
 def get_settings() -> Settings:

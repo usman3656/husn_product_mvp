@@ -5,7 +5,16 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from husn.core.config import get_settings
 from husn.core.logging import configure_logging, log
-from husn.routers import health
+from husn.routers import (
+    artifacts,
+    auth_jira,
+    auth_slack,
+    graph,
+    health,
+    jira_admin,
+    slack_admin,
+    slack_feed,
+)
 
 
 @asynccontextmanager
@@ -28,3 +37,10 @@ app.add_middleware(
 )
 
 app.include_router(health.router)
+app.include_router(auth_jira.router)
+app.include_router(jira_admin.router)
+app.include_router(auth_slack.router)
+app.include_router(slack_admin.router)
+app.include_router(slack_feed.router)
+app.include_router(artifacts.router)
+app.include_router(graph.router)
