@@ -176,6 +176,8 @@ class Artifact(Base):
     normalized_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+    claims_extracted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    claims_extractor_version: Mapped[int | None] = mapped_column()
 
     __table_args__ = (
         Index("ix_artifact_source_kind", "source", "kind"),
@@ -195,4 +197,54 @@ class ArtifactMention(Base):
     kind: Mapped[str] = mapped_column(String(32), primary_key=True)  # author|assignee|mention|watcher
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class Claim(Base):
+    """A structured fact pulled from one Artifact.
+
+    kind: date | owner | status | scope | decision | dependency
+    key:  semantic label within kind — e.g. for date the key might be
+          "duedate" (Jira structured) or "launch" (extracted from text);
+          for owner the key is the role ("assignee","author","mentioned").
+    value: normalized value (ISO date string, person id, status text, ...).
+    confidence: 0.0–1.0; structured fields → ~1.0, regex matches → 0.5–0.8.
+    source_anchor: JSONB pointer back to the verbatim source span:
+      {kind: "field",  artifact_id, field_path: "fields.duedate"} or
+      {kind: "span",   artifact_id, char_start, char_end, snippet}
+    extractor_version: bump to force re-extraction on rule changes.
+
+    Idempotent upsert key:
+      (source_artifact_id, kind, key, extractor_id, extractor_version)
+    """
+
+    __tablename__ = "claims"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    project_id: Mapped[int | None] = mapped_column(BigInteger, index=True)
+    source_artifact_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    key: Mapped[str] = mapped_column(String(128), nullable=False)
+    value: Mapped[str | None] = mapped_column(Text)
+    value_norm: Mapped[str | None] = mapped_column(Text)  # normalized form for grouping (e.g. ISO date)
+    status: Mapped[str | None] = mapped_column(String(32))  # active|superseded|stale (Step 4 will set)
+    confidence: Mapped[float] = mapped_column(nullable=False, default=1.0)
+    source_anchor: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    extractor_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    extractor_version: Mapped[int] = mapped_column(nullable=False, default=1)
+    extracted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "source_artifact_id",
+            "kind",
+            "key",
+            "extractor_id",
+            "extractor_version",
+            name="uq_claim_artifact_kind_key_extractor",
+        ),
+        Index("ix_claim_project_kind", "project_id", "kind"),
+        Index("ix_claim_kind_key", "kind", "key"),
     )

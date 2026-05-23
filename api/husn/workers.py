@@ -8,6 +8,7 @@ from husn.connectors.slack.backfill import get_connections as slack_get_connecti
 from husn.core.config import get_settings
 from husn.core.logging import configure_logging, log
 from husn.db.session import SessionLocal
+from husn.claims.extract import extract_pending as claims_extract_pending
 from husn.graph.normalize import normalize_pending as graph_normalize_pending
 
 settings = get_settings()
@@ -65,20 +66,33 @@ async def normalize_graph(ctx: dict) -> dict:
         return await graph_normalize_pending(session)
 
 
-# Cron schedules — drift-tolerant offsets so the three jobs don't pile up.
-# Arq cron uses cron-style sets; second/minute granularity is plenty for MVP.
-_BACKFILL_SECONDS = set(range(0, 60, 60))  # once per minute on :00
-_BACKFILL_SLACK_SECONDS = set(range(30, 60, 60))  # ...and :30 for Slack — 30s offset
-_NORMALIZE_SECONDS = set(range(0, 60, 15))  # every 15 seconds
+async def extract_claims(ctx: dict) -> dict:
+    """Sweep new artifacts → run all applicable claim extractors. Idempotent."""
+    async with SessionLocal() as session:
+        return await claims_extract_pending(session)
+
+
+# Cron schedules — drift-tolerant offsets so the four jobs don't pile up.
+_BACKFILL_SECONDS = {0}  # once per minute on :00
+_BACKFILL_SLACK_SECONDS = {30}  # ...and :30 for Slack — 30s offset
+_NORMALIZE_SECONDS = set(range(0, 60, 15))  # :00 :15 :30 :45
+_EXTRACT_SECONDS = set(range(5, 60, 15))  # :05 :20 :35 :50 — 5s after normalize
 
 
 class WorkerSettings:
     redis_settings = RedisSettings.from_dsn(settings.redis_url)
-    functions: list = [heartbeat, jira_backfill, slack_backfill, normalize_graph]
+    functions: list = [
+        heartbeat,
+        jira_backfill,
+        slack_backfill,
+        normalize_graph,
+        extract_claims,
+    ]
     cron_jobs = [
         cron(jira_backfill, second=_BACKFILL_SECONDS, run_at_startup=True),
         cron(slack_backfill, second=_BACKFILL_SLACK_SECONDS, run_at_startup=True),
         cron(normalize_graph, second=_NORMALIZE_SECONDS, run_at_startup=True),
+        cron(extract_claims, second=_EXTRACT_SECONDS, run_at_startup=True),
     ]
     on_startup = startup
     on_shutdown = shutdown

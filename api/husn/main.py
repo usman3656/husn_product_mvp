@@ -9,6 +9,7 @@ from husn.routers import (
     artifacts,
     auth_jira,
     auth_slack,
+    claims,
     graph,
     health,
     jira_admin,
@@ -44,3 +45,4 @@ app.include_router(slack_admin.router)
 app.include_router(slack_feed.router)
 app.include_router(artifacts.router)
 app.include_router(graph.router)
+app.include_router(claims.router)

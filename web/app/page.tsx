@@ -1,4 +1,5 @@
 import { ApiHealth } from "@/components/api-health";
+import { ClaimsCard } from "@/components/claims-card";
 import { GraphCard } from "@/components/graph-card";
 import { SlackPanel } from "@/components/slack-panel";
 import { SourcePanel } from "@/components/source-panel";
@@ -23,8 +24,12 @@ export default function Home() {
         <ApiHealth />
       </section>
 
-      <section className="mb-8">
+      <section className="mb-6">
         <GraphCard />
+      </section>
+
+      <section className="mb-8">
+        <ClaimsCard />
       </section>
 
       <section className="grid grid-cols-1 gap-4 md:grid-cols-2">
