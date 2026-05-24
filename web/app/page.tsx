@@ -1,5 +1,6 @@
 import { ApiHealth } from "@/components/api-health";
 import { ClaimsCard } from "@/components/claims-card";
+import { DriftCard } from "@/components/drift-card";
 import { GraphCard } from "@/components/graph-card";
 import { SlackPanel } from "@/components/slack-panel";
 import { SourcePanel } from "@/components/source-panel";
@@ -26,6 +27,10 @@ export default function Home() {
 
       <section className="mb-6">
         <GraphCard />
+      </section>
+
+      <section className="mb-6">
+        <DriftCard />
       </section>
 
       <section className="mb-8">

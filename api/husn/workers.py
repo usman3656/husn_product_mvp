@@ -9,6 +9,7 @@ from husn.core.config import get_settings
 from husn.core.logging import configure_logging, log
 from husn.db.session import SessionLocal
 from husn.claims.extract import extract_pending as claims_extract_pending
+from husn.drift.evaluate import evaluate_drift as drift_evaluate
 from husn.graph.normalize import normalize_pending as graph_normalize_pending
 
 settings = get_settings()
@@ -72,11 +73,18 @@ async def extract_claims(ctx: dict) -> dict:
         return await claims_extract_pending(session)
 
 
-# Cron schedules — drift-tolerant offsets so the four jobs don't pile up.
-_BACKFILL_SECONDS = {0}  # once per minute on :00
-_BACKFILL_SLACK_SECONDS = {30}  # ...and :30 for Slack — 30s offset
-_NORMALIZE_SECONDS = set(range(0, 60, 15))  # :00 :15 :30 :45
-_EXTRACT_SECONDS = set(range(5, 60, 15))  # :05 :20 :35 :50 — 5s after normalize
+async def evaluate_drift(ctx: dict) -> dict:
+    """Assign claims to groups, evaluate drift rules, open/close findings."""
+    async with SessionLocal() as session:
+        return await drift_evaluate(session)
+
+
+# Cron schedules — drift-tolerant offsets so the five jobs don't pile up.
+_BACKFILL_SECONDS = {0}            # :00 — jira backfill
+_BACKFILL_SLACK_SECONDS = {30}     # :30 — slack backfill (30s offset)
+_NORMALIZE_SECONDS = {0, 15, 30, 45}      # every 15s
+_EXTRACT_SECONDS = {5, 20, 35, 50}        # 5s after normalize
+_DRIFT_SECONDS = {10, 40}                 # 5s after extract, twice/min
 
 
 class WorkerSettings:
@@ -87,12 +95,14 @@ class WorkerSettings:
         slack_backfill,
         normalize_graph,
         extract_claims,
+        evaluate_drift,
     ]
     cron_jobs = [
         cron(jira_backfill, second=_BACKFILL_SECONDS, run_at_startup=True),
         cron(slack_backfill, second=_BACKFILL_SLACK_SECONDS, run_at_startup=True),
         cron(normalize_graph, second=_NORMALIZE_SECONDS, run_at_startup=True),
         cron(extract_claims, second=_EXTRACT_SECONDS, run_at_startup=True),
+        cron(evaluate_drift, second=_DRIFT_SECONDS, run_at_startup=True),
     ]
     on_startup = startup
     on_shutdown = shutdown

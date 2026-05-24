@@ -248,3 +248,94 @@ class Claim(Base):
         Index("ix_claim_project_kind", "project_id", "kind"),
         Index("ix_claim_kind_key", "kind", "key"),
     )
+
+
+class ClaimGroup(Base):
+    """A logical fact that multiple claims describe.
+
+    Example: 'project=All-work, kind=date, key=launch' — every claim about
+    the launch date for All-work belongs to this group. R-DATE-1 reads the
+    set of distinct value_norm in a group and flags drift when >1.
+
+    Identity: (project_id, kind, key). project_id NULL is allowed for
+    org-level facts that aren't yet scoped to a project.
+    """
+
+    __tablename__ = "claim_groups"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    project_id: Mapped[int | None] = mapped_column(BigInteger, index=True)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    key: Mapped[str] = mapped_column(String(128), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint("project_id", "kind", "key", name="uq_claim_group_project_kind_key"),
+    )
+
+
+class ClaimGroupMember(Base):
+    """Many claims → one group. One claim belongs to at most one group."""
+
+    __tablename__ = "claim_group_members"
+
+    claim_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    claim_group_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+
+
+class Finding(Base):
+    """A detected drift / conflict / unrecorded-decision event.
+
+    rule_id: human-readable rule id ("R-DATE-1", "R-DECISION-1", ...)
+    claim_group_id: the group whose claims disagreed
+    status: open | closed | snoozed
+    severity: low | medium | high
+    summary: one-line human description ("launch date drift: 2026-06-03 vs 2026-06-10")
+
+    A (rule_id, claim_group_id) pair has at most one OPEN finding at a time
+    (enforced via partial unique index in the migration). On reconvergence the
+    open finding is updated to closed; if drift recurs later, a new finding row
+    is inserted with a fresh opened_at.
+    """
+
+    __tablename__ = "findings"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    rule_id: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    claim_group_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    project_id: Mapped[int | None] = mapped_column(BigInteger, index=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="open")
+    severity: Mapped[str] = mapped_column(String(16), nullable=False, default="medium")
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    details: Mapped[dict | None] = mapped_column(JSONB)
+    opened_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        Index("ix_finding_status", "status"),
+        Index("ix_finding_project_status", "project_id", "status"),
+    )
+
+
+class FindingEvidence(Base):
+    """The verbatim source claims a finding cites.
+
+    role: 'primary' for the canonical claims (the conflicting values),
+          'supporting' for context (e.g. the artifact the doc claim came from).
+    """
+
+    __tablename__ = "finding_evidence"
+
+    finding_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    claim_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    role: Mapped[str] = mapped_column(String(16), nullable=False, default="primary")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
