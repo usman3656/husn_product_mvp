@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     slack_signing_secret: str = ""
     slack_redirect_uri: str = "http://localhost:8000/auth/slack/callback"
 
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    google_redirect_uri: str = "http://localhost:8000/auth/google/callback"
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -1,6 +1,7 @@
-"""Google connector — Gmail + Drive/Docs.
+"""Google connector — Gmail + Drive (covers Docs + Sheets).
 
-Reading mail bodies = restricted scope → annual CASA assessment.
-Drive quota-units model lands May 1, 2026. Gmail Pub/Sub push TTL is 7 days;
-missed events require full reconciliation. See knowledge.md sec. 7.
+Per knowledge.md §6 C and docs/google-setup.md:
+  * OAuth 2.0 with restricted scopes (gmail.readonly + drive.readonly).
+  * Testing-mode bypass for verification + CASA — fine for local MVP, not prod.
+  * Strict ingestion allowlist (Gmail labels + Drive folders) per project_sources.
 """

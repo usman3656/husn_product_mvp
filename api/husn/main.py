@@ -7,10 +7,13 @@ from husn.core.config import get_settings
 from husn.core.logging import configure_logging, log
 from husn.routers import (
     artifacts,
+    auth_google,
     auth_jira,
     auth_slack,
     claims,
+    connections,
     findings,
+    google_admin,
     graph,
     health,
     jira_admin,
@@ -44,6 +47,9 @@ app.include_router(jira_admin.router)
 app.include_router(auth_slack.router)
 app.include_router(slack_admin.router)
 app.include_router(slack_feed.router)
+app.include_router(auth_google.router)
+app.include_router(google_admin.router)
+app.include_router(connections.router)
 app.include_router(artifacts.router)
 app.include_router(graph.router)
 app.include_router(claims.router)

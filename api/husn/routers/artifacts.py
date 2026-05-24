@@ -90,4 +90,37 @@ def _summarize(r: RawArtifact) -> dict[str, Any]:
             "name": p.get("real_name") or p.get("name") or prof.get("real_name"),
             "title": prof.get("title"),
         }
+    if r.source == "google" and r.kind == "email":
+        # Headers live in payload.payload.headers
+        headers = ((p.get("payload") or {}).get("headers") or [])
+        h = {(x.get("name") or "").lower(): x.get("value") for x in headers}
+        return {
+            "subject": h.get("subject"),
+            "from": h.get("from"),
+            "to": h.get("to"),
+            "thread_id": p.get("threadId"),
+            "snippet": (p.get("snippet") or "")[:160],
+        }
+    if r.source == "google" and r.kind == "doc":
+        meta = p.get("drive_metadata") or {}
+        doc = p.get("document") or {}
+        return {
+            "name": doc.get("title") or meta.get("name"),
+            "modified": meta.get("modifiedTime"),
+            "owner": (meta.get("owners") or [{}])[0].get("displayName"),
+        }
+    if r.source == "google" and r.kind == "sheet":
+        meta = p.get("drive_metadata") or {}
+        sp = p.get("spreadsheet") or {}
+        return {
+            "name": (sp.get("properties") or {}).get("title") or meta.get("name"),
+            "sheets": len(sp.get("sheets") or []),
+            "modified": meta.get("modifiedTime"),
+        }
+    if r.source == "google" and r.kind in ("drive_file", "drive_folder"):
+        return {
+            "name": p.get("name"),
+            "mime_type": p.get("mimeType"),
+            "modified": p.get("modifiedTime"),
+        }
     return {"title": p.get("title") or p.get("name") or p.get("key") or r.external_id}

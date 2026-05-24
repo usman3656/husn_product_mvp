@@ -13,6 +13,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from husn.core.logging import log
 from husn.db.models import Artifact, Connection, RawArtifact
+from husn.graph.normalizers.google import (
+    normalize_google_doc,
+    normalize_google_drive_file,
+    normalize_google_drive_folder,
+    normalize_google_email,
+    normalize_google_sheet,
+)
 from husn.graph.normalizers.jira import normalize_jira_issue, normalize_jira_project
 from husn.graph.normalizers.slack import (
     normalize_slack_channel,
@@ -31,6 +38,11 @@ _DISPATCH: dict[tuple[str, str], Callable[..., Awaitable[Any]]] = {
     ("slack", "message"): normalize_slack_message,
     ("slack", "channel"): normalize_slack_channel,
     ("slack", "user"): normalize_slack_user,
+    ("google", "email"): normalize_google_email,
+    ("google", "doc"): normalize_google_doc,
+    ("google", "sheet"): normalize_google_sheet,
+    ("google", "drive_file"): normalize_google_drive_file,
+    ("google", "drive_folder"): normalize_google_drive_folder,
 }
 
 
@@ -78,15 +90,28 @@ async def normalize_pending(session: AsyncSession, batch_size: int = 200) -> dic
         if fn is None:
             counts["skipped"] += 1
             continue
+        # Capture identifying fields BEFORE the call so we can log them even
+        # if the session ends up in a rolled-back state after a failure.
+        raw_id, raw_source, raw_kind = raw.id, raw.source, raw.kind
         try:
-            if raw.source == "jira" and raw.kind == "issue":
+            if raw_source == "jira" and raw_kind == "issue":
                 site_url = await _site_url_for(session, raw)
                 await fn(session, raw, site_url=site_url)
             else:
                 await fn(session, raw)
+            await session.flush()  # surface PK violations now, per-row
             counts["normalized"] += 1
-        except Exception:
-            log.exception("husn.graph.normalize.failed", raw_id=raw.id, source=raw.source, kind=raw.kind)
+        except Exception as e:
+            # Recover the session so the next iteration can run.
+            await session.rollback()
+            log.warning(
+                "husn.graph.normalize.failed",
+                raw_id=raw_id,
+                source=raw_source,
+                kind=raw_kind,
+                error=type(e).__name__,
+                msg=str(e)[:200],
+            )
             counts["skipped"] += 1
 
     await session.commit()
