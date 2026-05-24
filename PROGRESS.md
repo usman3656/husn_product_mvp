@@ -8,7 +8,7 @@
 
 | Field | Value |
 |---|---|
-| Last commit on `main` | `b96c1a9` — Step 6 v1 checkpoint + Step 6 v2 architecture docs + chat with RAG |
+| Last commit on `main` | `1a0b029` — Microsoft connector + content extraction (.html/.csv/.docx/.xlsx) + per-panel disconnect |
 | Current step in flight | **Step 6 v2 — AI TPM agent (skeleton + LLM-as-typewriter + NLI verifier)** |
 | Phase within Step 6 v2 | v1 (single-call LLM-direct-from-dossier) shipped as checkpoint; v2 rewrite is next coding step |
 | **LLM backend live** | Groq (`llama-3.3-70b-versatile`, free tier, 6K TPM). API key in `.env`. Ollama qwen2.5:7b also available locally as fallback. |
@@ -182,6 +182,7 @@ Keep this file under ~300 lines. Truncate `Recent activity` to last 30 entries.
 
 ## Recent activity (newest first)
 
+- **2026-05-25** — Commit `1a0b029`: Microsoft connector end-to-end + OneDrive content extraction (.html/.csv/.txt/.docx/.xlsx, 5 MB / 8 K cap, downloads via Graph /items/{id}/content) + per-panel disconnect button on all four source panels. Important fix: OneDrive folder picker now recognises remoteItem-mounted shared folders ("Add shortcut to My files") — previously hid them silently. Project Atlas (shared org folder) now ingested: 16 files (7 .html + 9 .csv), all with body content, avg 631 chars. Risk Register, Launch Plan, Cutover Runbook all readable as plain text. Cron `microsoft_backfill` at :45 every minute; delta-only after first run via /me/drive/items/{id}/delta + /drives/{drive}/items/{id}/delta for shared folders. PROGRESS Step 7 extended with the full file-type coverage TODO (.pptx, PDFs, full-sheet content, .rtf / .odt / .pages / .keynote, .zip).
 - **2026-05-24** — Commit `b96c1a9`: Step 6 v1 checkpoint + v2 architecture docs + chat with RAG. v1 brief path is live but explicitly NOT v2-aligned; next coding step is to rewrite to skeleton + typewriter + NLI verifier. Chat surface IS v2-aligned (RAG only on `/chat`). Verified live: 2 findings + 4 briefs from Project Atlas data in 1.96s, 0 hallucinated citations. Chat answers correctly cite Google Doc "Weekly Status Notes — Atlas" after RAG retrieval pull-in.
 - **2026-05-24** — Docs-only pivot v2: architecture deepening (brief skeleton + LLM-as-typewriter + two-track feedback + Tier-0-only learning). 7-agent parallel critic pass ratified. `knowledge.md` §11 added with the architecture decisions and §8 holes 12–14 added with the risks the critics surfaced. `plan.md` Step 6 fully rewritten; Steps 7 and 8 repurposed from `subsumed` slots to cover feedback-loop and tiered-learning. No code changes — Step 6 build will start from the new design.
 - **2026-05-24** — Commit `50e5910`: audit-watcher daemon. Host-side Python poller (no deps), 4s interval, calls existing `.claude/audit.sh` on changed files. Started in background (`pid` in `/tmp/husn-audit-watcher.pid`). Storms capped at 5 audits/tick.
