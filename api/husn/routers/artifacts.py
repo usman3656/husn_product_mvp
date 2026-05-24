@@ -123,4 +123,22 @@ def _summarize(r: RawArtifact) -> dict[str, Any]:
             "mime_type": p.get("mimeType"),
             "modified": p.get("modifiedTime"),
         }
+    if r.source == "microsoft" and r.kind == "email":
+        from_addr = (p.get("from") or {}).get("emailAddress") or {}
+        return {
+            "subject": p.get("subject"),
+            "from": from_addr.get("name") or from_addr.get("address"),
+            "received": p.get("receivedDateTime"),
+            "snippet": (p.get("bodyPreview") or "")[:160],
+            "is_read": p.get("isRead"),
+        }
+    if r.source == "microsoft" and r.kind in (
+        "office_doc", "office_sheet", "office_slides", "drive_file", "drive_folder"
+    ):
+        return {
+            "name": p.get("name"),
+            "modified": p.get("lastModifiedDateTime"),
+            "size": p.get("size"),
+            "web_url": p.get("webUrl"),
+        }
     return {"title": p.get("title") or p.get("name") or p.get("key") or r.external_id}

@@ -21,14 +21,15 @@
 
 | Step | Status | Notes |
 |---|---|---|
-| **1 — Connectors** | ✅ shipped (3 of 4 sources) | Jira (3LO OAuth), Slack (OAuth v2 bot install), Google (Gmail + Drive + Docs + Sheets, allowlist UI, delta sync). Microsoft deferred. |
+| **1 — Connectors** | ✅ shipped (4 of 4 sources) | Jira (3LO OAuth), Slack (OAuth v2 bot install), Google (Gmail + Drive + Docs + Sheets, allowlist UI, delta sync), **Microsoft (Outlook + OneDrive incl. shared/remoteItem folders, per-folder delta sync, content extraction for .html / .csv / .txt / .docx / .xlsx)**. Per-panel disconnect buttons on all four. |
 | **2 — Operational graph** | ✅ shipped | persons, person_identities, projects, project_sources, artifacts, artifact_mentions. Continuous sync via Arq cron. Email identities resolved by lowercase email address; mention writes use `ON CONFLICT DO NOTHING`. |
 | **3 — Claims (deterministic)** | 🟡 partial — Slack + Jira only | 7 extractors with evidence anchors fire on Slack messages + Jira issues. Google email / doc / sheet content is normalized but **no extractors run on it yet** (would need ~3 new extractor classes; trivial work but not yet shipped). |
 | **4 — Drift (deterministic)** | 🟡 partial — kept | R-DATE-1 shipped + Drift inbox UI. Remaining rules (R-DATE-2, R-DECISION-1, R-OWNER-1) + auto-close **skipped per 2026-05-24 pivot**. R-DATE-1 stays as always-on fallback. |
 | **5 — Propagation** | ⛔ subsumed | Folded into Step 6. Agent will decide who needs to know. |
 | **6 — AI TPM agent (brief skeleton + LLM-as-typewriter)** | 🟡 v1 shipped, v2 pending | **v1 (single-call LLM-direct-from-dossier) is live.** Produces 2 findings + 4 briefs in ~2s on Groq Llama 3.3 70B; citation validator catches hallucinated claim_ids. **v2 rewrite is next:** deterministic skeleton builder → Anthropic renderer → NLI verifier → deterministic-template fallback. See `## What's next`. |
 | **6.chat — Interactive Q&A (RAG, aligned with v2)** | ✅ shipped | `/chat` page with session sidebar; client-side fetch; assistant turns cite `[claim N]` / `[artifact N]` chips; per-question RAG retrieval via Postgres ILIKE keyword search across artifacts.title+body, deduped against a recency floor. Working end-to-end against Project Atlas. |
-| **7 — Feedback loop (clarifications + two-track writes)** | 📋 planned | Repurposed slot. Track A fact-writes immediate; Track B pattern promotions gated on quorum + COI + Dawid-Skene reliability. |
+| **7 — Feedback loop (clarifications + two-track writes)** | 📋 planned | Repurposed slot. Track A fact-writes immediate; Track B pattern promotions gated on quorum + COI + Dawid-Skene reliability. **Also bundled into Step 7: full file-type coverage** — see the dedicated row below. |
+| **7.files — Full file-type coverage (read ALL formats, full content)** | 📋 planned | Today's gaps: (a) **.pptx** (PowerPoint) — both OneDrive and Google Slides — needs `python-pptx` + Slides API path; (b) **PDF** — needs `pypdf` or similar, applies to OneDrive PDFs and Google Drive PDFs; (c) **Google Sheets full content** — currently capped at 50 rows/tab × all sheets, lift to full; (d) **OneDrive .xlsx full content** — same 50-row cap, lift to full; (e) other formats encountered in real customer data (.rtf, .odt, .pages, .keynote, archived .zip). One unified `content_extractor` module callable from both Google + Microsoft backfills. |
 | **8 — Tiered learning (Tier 0 dict only in MVP)** | 📋 planned | Tier 0 alias dictionary. Tier 1 (few-shot) deferred; Tier 2 (LoRA) opt-in / DPIA-only, out of MVP. |
 | **Connections management** | ✅ shipped | `/connections` page lists every source connection with token health, scope count, artifact count, last-sync time. Disconnect wipes the token + allowlist but keeps historical data. |
 | **Audit watcher** | ✅ shipped | Host-side Python daemon polls the project tree every 4s and runs `.claude/audit.sh` on changes. Survives terminal close, not reboot. |
@@ -161,6 +162,8 @@ curl http://localhost:8000/health    # {"status":"ok","version":"0.0.1"}
 | `docs/jira-setup.md` | how the Jira OAuth integration was registered |
 | `docs/slack-setup.md` | how the Slack OAuth integration was registered |
 | `docs/google-setup.md` | how the Google OAuth client was registered + scope choice rationale |
+| `docs/microsoft-setup.md` | how the Microsoft Entra app was registered + scope choice rationale |
+| `original-prompt.md` | founder prompt captured verbatim + survived-vs-adapted side-by-side |
 | `.claude/bin/audit-watcher.{py,sh}` | always-on host-side audit daemon |
 
 ---

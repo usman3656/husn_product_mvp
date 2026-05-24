@@ -30,6 +30,11 @@ class Settings(BaseSettings):
     google_client_secret: str = ""
     google_redirect_uri: str = "http://localhost:8000/auth/google/callback"
 
+    ms_client_id: str = ""
+    ms_client_secret: str = ""
+    ms_tenant: str = "common"  # 'common' = personal + any work tenant
+    ms_redirect_uri: str = "http://localhost:8000/auth/microsoft/callback"
+
     # LLM backend for the Step 6 agent. Provider determines which client is used;
     # each provider gets its own base_url + model fields below.
     llm_provider: str = "ollama"  # ollama | groq | anthropic | claude_cli

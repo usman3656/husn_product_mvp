@@ -1,3 +1,5 @@
+import { DisconnectButton } from "@/components/disconnect-button";
+
 const SERVER_API_URL = process.env.API_URL ?? "http://api:8000";
 const BROWSER_API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -91,7 +93,15 @@ export async function SourcePanel({
             </p>
           )}
         </div>
-        <SourceBadge sourceKey={sourceKey} connected={isConnected} count={items.length} />
+        <div className="flex items-center">
+          <SourceBadge sourceKey={sourceKey} connected={isConnected} count={items.length} />
+          {sourceKey === "jira" && isConnected && jiraStatus.connections[0] && (
+            <DisconnectButton
+              connectionId={jiraStatus.connections[0].id}
+              label={jiraStatus.connections[0].account_label || jiraStatus.connections[0].site_url || "Jira"}
+            />
+          )}
+        </div>
       </div>
 
       {sourceKey === "jira" ? (

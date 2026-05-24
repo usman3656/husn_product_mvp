@@ -1,6 +1,6 @@
-"""Microsoft connector — Outlook/Teams/SharePoint via MS Graph.
+"""Microsoft connector — Outlook + OneDrive + SharePoint via Microsoft Graph.
 
-Outlook throttling: 10k req/10-min per app+mailbox (~16 rps); recommended 4-10.
-Teams: 4 rps per app per team, 1 rps per app per channel/chat.
-Publisher verification + M365 Certification required before enterprise rollout.
+One OAuth app, one access token, one Graph base URL. Mail / Files / Sites
+share the same surface. Outlook 10K req / 10-min per app+mailbox (recommended
+4-10 rps); per-tenant cap halved Sep 30, 2025. See knowledge.md §7 row 4.
 """

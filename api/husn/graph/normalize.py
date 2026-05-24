@@ -20,6 +20,14 @@ from husn.graph.normalizers.google import (
     normalize_google_email,
     normalize_google_sheet,
 )
+from husn.graph.normalizers.microsoft import (
+    normalize_ms_drive_file,
+    normalize_ms_drive_folder,
+    normalize_ms_email,
+    normalize_ms_office_doc,
+    normalize_ms_office_sheet,
+    normalize_ms_office_slides,
+)
 from husn.graph.normalizers.jira import normalize_jira_issue, normalize_jira_project
 from husn.graph.normalizers.slack import (
     normalize_slack_channel,
@@ -43,6 +51,12 @@ _DISPATCH: dict[tuple[str, str], Callable[..., Awaitable[Any]]] = {
     ("google", "sheet"): normalize_google_sheet,
     ("google", "drive_file"): normalize_google_drive_file,
     ("google", "drive_folder"): normalize_google_drive_folder,
+    ("microsoft", "email"): normalize_ms_email,
+    ("microsoft", "office_doc"): normalize_ms_office_doc,
+    ("microsoft", "office_sheet"): normalize_ms_office_sheet,
+    ("microsoft", "office_slides"): normalize_ms_office_slides,
+    ("microsoft", "drive_file"): normalize_ms_drive_file,
+    ("microsoft", "drive_folder"): normalize_ms_drive_folder,
 }
 
 

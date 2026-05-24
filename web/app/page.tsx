@@ -4,13 +4,11 @@ import { ClaimsCard } from "@/components/claims-card";
 import { DriftCard } from "@/components/drift-card";
 import { GooglePanel } from "@/components/google-panel";
 import { GraphCard } from "@/components/graph-card";
+import { MicrosoftPanel } from "@/components/microsoft-panel";
 import { SlackPanel } from "@/components/slack-panel";
 import { SourcePanel } from "@/components/source-panel";
 
-const OTHER_SOURCES = [
-  { key: "jira", label: "Jira" },
-  { key: "microsoft", label: "Microsoft (Outlook + Teams + SharePoint)" },
-] as const;
+const OTHER_SOURCES = [{ key: "jira", label: "Jira" }] as const;
 
 export default function Home() {
   return (
@@ -67,6 +65,7 @@ export default function Home() {
       <section className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <SlackPanel />
         <GooglePanel />
+        <MicrosoftPanel />
         {OTHER_SOURCES.map((s) => (
           <SourcePanel key={s.key} sourceKey={s.key} label={s.label} />
         ))}

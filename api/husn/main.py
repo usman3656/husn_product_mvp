@@ -10,6 +10,7 @@ from husn.routers import (
     artifacts,
     auth_google,
     auth_jira,
+    auth_microsoft,
     auth_slack,
     chat,
     claims,
@@ -19,6 +20,7 @@ from husn.routers import (
     graph,
     health,
     jira_admin,
+    microsoft_admin,
     slack_admin,
     slack_feed,
 )
@@ -51,6 +53,8 @@ app.include_router(slack_admin.router)
 app.include_router(slack_feed.router)
 app.include_router(auth_google.router)
 app.include_router(google_admin.router)
+app.include_router(auth_microsoft.router)
+app.include_router(microsoft_admin.router)
 app.include_router(connections.router)
 app.include_router(artifacts.router)
 app.include_router(graph.router)

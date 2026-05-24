@@ -7,6 +7,8 @@ from husn.connectors.google.backfill import backfill_connection as google_backfi
 from husn.connectors.google.backfill import get_connections as google_get_connections
 from husn.connectors.jira.backfill import backfill_connection as jira_backfill_connection
 from husn.connectors.jira.backfill import get_connections as jira_get_connections
+from husn.connectors.microsoft.backfill import backfill_connection as microsoft_backfill_connection
+from husn.connectors.microsoft.backfill import get_connections as microsoft_get_connections
 from husn.connectors.slack.backfill import backfill_connection as slack_backfill_connection
 from husn.connectors.slack.backfill import get_connections as slack_get_connections
 from husn.core.config import get_settings
@@ -76,6 +78,18 @@ async def google_backfill(ctx: dict, connection_id: int | None = None) -> dict:
     return summary
 
 
+async def microsoft_backfill(ctx: dict, connection_id: int | None = None) -> dict:
+    summary: dict[int, dict] = {}
+    async with SessionLocal() as session:
+        connections = await _resolve_connections(
+            session, "microsoft", connection_id, microsoft_get_connections
+        )
+        for conn in connections:
+            summary[conn.id] = await microsoft_backfill_connection(session, conn)
+    log.info("husn.worker.microsoft_backfill.done", summary=summary)
+    return summary
+
+
 async def normalize_graph(ctx: dict) -> dict:
     """Sweep new raw_artifacts into the operational graph. Idempotent."""
     async with SessionLocal() as session:
@@ -109,6 +123,7 @@ async def run_agent(ctx: dict) -> dict:
 _BACKFILL_JIRA_SECONDS = {0}             # :00 — jira backfill
 _BACKFILL_GOOGLE_SECONDS = {15}          # :15 — google (Gmail + Drive)
 _BACKFILL_SLACK_SECONDS = {30}           # :30 — slack backfill
+_BACKFILL_MS_SECONDS = {45}              # :45 — microsoft (Outlook + OneDrive)
 _NORMALIZE_SECONDS = {0, 15, 30, 45}     # every 15s
 _EXTRACT_SECONDS = {5, 20, 35, 50}       # 5s after normalize
 _DRIFT_SECONDS = {10, 40}                # 5s after extract, twice/min
@@ -122,6 +137,7 @@ class WorkerSettings:
         jira_backfill,
         slack_backfill,
         google_backfill,
+        microsoft_backfill,
         normalize_graph,
         extract_claims,
         evaluate_drift,
@@ -131,6 +147,7 @@ class WorkerSettings:
         cron(jira_backfill, second=_BACKFILL_JIRA_SECONDS, run_at_startup=True),
         cron(google_backfill, second=_BACKFILL_GOOGLE_SECONDS, run_at_startup=True),
         cron(slack_backfill, second=_BACKFILL_SLACK_SECONDS, run_at_startup=True),
+        cron(microsoft_backfill, second=_BACKFILL_MS_SECONDS, run_at_startup=True),
         cron(normalize_graph, second=_NORMALIZE_SECONDS, run_at_startup=True),
         cron(extract_claims, second=_EXTRACT_SECONDS, run_at_startup=True),
         cron(evaluate_drift, second=_DRIFT_SECONDS, run_at_startup=True),

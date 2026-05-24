@@ -1,3 +1,5 @@
+import { DisconnectButton } from "@/components/disconnect-button";
+
 const SERVER_API_URL = process.env.API_URL ?? "http://api:8000";
 const BROWSER_API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -74,16 +76,24 @@ export async function SlackPanel() {
             </p>
           )}
         </div>
-        <span
-          className="rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-wide"
-          style={{
-            borderColor: isConnected ? "#22c55e55" : "var(--border)",
-            color: isConnected ? "#86efac" : "var(--muted)",
-            background: isConnected ? "#22c55e11" : "transparent",
-          }}
-        >
-          {isConnected ? "connected" : "not connected"}
-        </span>
+        <div className="flex items-center">
+          <span
+            className="rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-wide"
+            style={{
+              borderColor: isConnected ? "#22c55e55" : "var(--border)",
+              color: isConnected ? "#86efac" : "var(--muted)",
+              background: isConnected ? "#22c55e11" : "transparent",
+            }}
+          >
+            {isConnected ? "connected" : "not connected"}
+          </span>
+          {isConnected && status.connections[0] && (
+            <DisconnectButton
+              connectionId={status.connections[0].id}
+              label={status.connections[0].team_name || status.connections[0].account_label || "Slack"}
+            />
+          )}
+        </div>
       </div>
 
       {!isConnected ? (
