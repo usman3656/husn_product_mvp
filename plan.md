@@ -2,6 +2,15 @@
 
 > **Read `knowledge.md` first.** Three findings reshape the architecture before line 1 of code: (1) Slack ToS forbids centralized bulk pull → per-workspace install pattern, (2) CC'd shadow inbox is dead → OAuth-only for email, (3) anti-monitoring framing is product structure, not polish.
 
+> **Plan-pivot note (2026-05-24).** Original Steps 4-5-6-7 were a strict deterministic-first ladder ("no LLM before Step 6"). After shipping the Step 4 deterministic baseline (`R-DATE-1`) we observed that the rest of Steps 4-5-7 (auto-close, family-key tuning, propagation routing, separate forecasting model) are all logic the LLM agent will subsume — and chat messages can't be retroactively edited, so deterministic auto-close is inherently brittle. The pivot:
+>
+> - **Step 1-3 + Step 4 deterministic baseline:** kept as the *substrate* the agent reads (ingestion, operational graph, claims with evidence anchors, claim_groups, finding_evidence schema).
+> - **Step 4 remaining rules (R-DATE-2, R-DECISION-1, R-OWNER-1, family-key tuning, auto-close):** **skipped** — the agent does richer judgement.
+> - **Step 5 (propagation routing) + Step 7 (forecasting):** **subsumed into Step 6** — the agent decides who needs to know and surfaces forecast signals in the same loop.
+> - **Step 6 (AI alignment briefs):** **brought forward and expanded** to cover findings, briefs, and recommendations in one agent.
+>
+> See `## Step 6 — AI TPM agent (expanded)` below for the new scope.
+
 ---
 
 ## Stack & Scope
@@ -95,98 +104,79 @@ Each step ships and is usable end-to-end before the next starts. No step starts 
 
 ---
 
-### Step 4 — Drift / conflict detection
+### Step 4 — Drift / conflict detection (deterministic baseline only)
 
-**Goal:** Surface when claims about the same thing conflict across sources.
+> **Status (2026-05-24): partially shipped, remainder skipped per pivot.**
+> Shipped: `claim_groups`, `findings`, `finding_evidence` schema + rule **R-DATE-1** + dashboard Drift inbox + family-key grouper (launch/ship/release/go-live/cutover/target → "release"). This baseline acts as the always-on fallback even if Anthropic is down.
+> Skipped: R-DATE-2 (stale), R-DECISION-1 (unrecorded), R-OWNER-1 (unannounced), auto-close-on-reconvergence, deeper family-key tuning. All subsumed by Step 6 agent.
+> Reason: chat messages can't be retroactively edited, so deterministic auto-close is inherently brittle; richer judgement (binding vs nonbinding, correction messages, cancelled milestones) requires reading the conversation, which is what the LLM does.
 
-**Deliverable:**
-- `claim_groups(id, project_id, kind, key)` — groups claims that describe the same logical fact (e.g. "Project Atlas launch date"). Grouping rule: same `(project, kind, key)`; `key` is derived per-`kind` (for `date`, the key is the date-subject like "launch"; for `owner`, the role; etc.).
-- Drift rule engine in `/api/drift/rules/`:
-  - **R-DATE-1:** more than one distinct `value` in a `claim_group` of kind `date` within the same project → conflict
-  - **R-DATE-2:** newest source claim differs from any claim referenced in artifacts updated within the last N days → stale
-  - **R-DECISION-1:** decision claim in a transcript/DM has no matching claim in a "doc-of-record" artifact within 48h → unrecorded
-  - **R-OWNER-1:** Jira assignee changed; no matching mention in Slack/email in the next 24h → unannounced
-- Drift findings table: `findings(id, rule_id, claim_group_id, severity, evidence_artifact_ids, status, opened_at, closed_at)`
-- Dashboard: per-project "drift inbox" with open/closed findings; click-through to evidence
-- **Strict UX rule:** findings name **artifacts and teams**, never individuals. "QA team has no acknowledgment in #qa-eng" not "Samir didn't respond."
+**What's live today:**
+- `claim_groups(project_id, kind, key)` with family-key mapping (`launch`/`ship`/`release`/`go-live`/`cutover`/`target` → `release`; `deadline`/`due`/`target` ↔ `deadline` separately).
+- R-DATE-1 fires when ≥2 distinct `value_norm` exist in a date-claim-group with confidence ≥ 0.5. Opens one finding per `(rule_id, claim_group_id)` (partial unique index enforces this).
+- `findings.details` carries `per_source` blocks so the UI shows "Slack says X / Jira says Y" side-by-side.
+- Cron `evaluate_drift` runs at `:10` and `:40` every minute, plus on worker startup.
+- UI surface: red "Drift inbox" card on dashboard with side-by-side evidence; "in sync" green badge when zero open.
 
-**Effort:** 2 weeks.
-
-**Exit criteria:**
-1. Seeded contradiction (June 3 → June 10 across Jira/deck/Slack) is detected by R-DATE-1 within 60 seconds of the change.
-2. Each finding has at minimum 2 source artifacts as evidence + a one-sentence human-readable description.
-3. Findings auto-close when the underlying contradiction is resolved (e.g. deck updated to June 10).
-4. A 1-week false-positive review shows ≥80% precision on the active rules; lower-precision rules are disabled or gated behind a "preview" flag.
+**Strict UX rule (carried into Step 6):** findings name **artifacts and teams**, never individuals.
 
 ---
 
 ### Step 5 — Propagation & acknowledgment
 
-**Goal:** When a claim changes, identify affected people/teams via the graph and request acknowledgment in-app + via Slack DM/email. Track unack'd state.
-
-**Deliverable:**
-- `change_events(id, claim_group_id, before_claim_id, after_claim_id, detected_at)` — every claim change creates one
-- "Affected" resolver: given a change event, return `{teams: [...], persons: [...]}` based on graph edges (channel membership, Jira watchers, doc viewers, prior mentions). Tunable per-project.
-- `acknowledgments(id, change_event_id, subject_kind, subject_id, status, acknowledged_at, channel)` — one row per (event, team-or-person)
-- Notification dispatcher: in-app inbox + Slack DM (using the customer-installed app — does not violate ToS) + email digest
-- Ack UX: a single click in Slack ("acknowledge") or in-app, with evidence visible. **No "responsiveness" metric anywhere.**
-- Dashboard surface: per-finding "Affected: 3 teams (2 acknowledged)" with breakdown
-
-**Effort:** 2 weeks.
-
-**Exit criteria:**
-1. A simulated date-change generates an event, resolves to N affected teams, dispatches acknowledgments, and updates state correctly when a user clicks "ack."
-2. Unacknowledged-state never references named individuals in any user-visible surface.
-3. Ack records have evidence lineage: which finding, which claims, which artifacts, when sent, when acked.
-4. Re-running propagation does not duplicate notifications (idempotent on `(change_event_id, subject)`).
+> **Status: subsumed into Step 6.** The agent picks who needs to know and surfaces it as a recommendation. The original idea of a deterministic affected-resolver + 1-click ack flow is deferred until we see how Step 6 performs in practice.
 
 ---
 
-### Step 6 — AI alignment briefs (first LLM step)
+### Step 6 — AI TPM agent (expanded)
 
-**Goal:** Generate per-persona, per-meeting briefs grounded **only** in claims/evidence already in the graph. No free-floating summarization.
+> **Brought forward; expanded scope.** Replaces remaining Step 4 rules, Step 5, and Step 7. This is now the centerpiece of the product.
 
-**Deliverable:**
-- `briefs(id, project_id, audience_persona, generated_at, content jsonb, model, prompt_version, source_claim_ids)` — every brief stores the exact claims it cites
-- Brief generator pipeline:
-  1. **Retrieve** open findings, recent change events, unacknowledged claims for the persona's team/project (deterministic — no LLM)
-  2. **Compose** a structured input package (a JSON dossier of claims + evidence snippets)
-  3. **Generate** prose using Claude with a strict system prompt forbidding any claim not in the input; output is JSON with `bullets[]: {text, claim_ids[]}`
-  4. **Verify** that every `claim_id` cited exists; reject and regenerate if not
-- UI: brief preview before send; "every sentence has a source link" presentation
-- Audit log: every brief view recorded `(brief_id, viewer_id, viewed_at)`
-- Hard-coded language defaults: "no recorded acknowledgment from QA team" — never "QA did not respond"
+**Goal:** A Claude-driven loop that reads the operational graph + claims + raw artifacts and produces, for each project:
+1. **Findings** — richer than R-DATE-1. Distinguishes binding commitments from nonbinding chat. Reads correction messages. Accounts for cancelled milestones. Writes into the existing `findings` table with `rule_id="AGENT-FINDING-{kind}"`.
+2. **Per-persona pre-meeting briefs** — the canonical husn.io demo output. Written into a new `briefs` table.
+3. **Recommendations** — "ping Security about the new dataflow", "this assignee change wasn't announced" — surfaced inline with findings.
 
-**Effort:** 2–3 weeks.
+**Schema additions:**
+- `briefs(id, project_id, persona, content jsonb, model, prompt_version, generated_at)` — `content.bullets[].claim_ids[]` cite the exact claims each bullet rests on.
+- `agent_runs(id, project_id, triggered_by, started_at, finished_at, status, input_token_count, output_token_count, error)` — per-run audit log.
+
+**Pipeline:**
+1. **Retrieve** (deterministic, in `husn.agent.context`): claims by group, recent artifacts in time order, identity graph for the project, current open findings.
+2. **Compose** a structured dossier (JSON) keyed on `claim_id` / `artifact_id`.
+3. **Generate** via Anthropic SDK with a strict system prompt:
+   - Output is JSON: `{findings: [{rule_id, summary, claim_ids, severity}], briefs: [{persona, bullets: [{text, claim_ids}]}], recommendations: [...]}`.
+   - System prompt forbids: (a) any claim/citation not in the input dossier, (b) any per-individual scoring or responsiveness language, (c) the "X did not respond" framing (must use "no recorded acknowledgment from team Y").
+4. **Verify** post-LLM: every cited `claim_id` exists in the input; reject and regenerate (or fall back to R-DATE-1 only) if not.
+5. **Persist** findings into the existing `findings` table; persist briefs into `briefs`; record evidence rows in `finding_evidence`.
+
+**Triggering:**
+- Cron `agent_analyze` every 5 minutes per project.
+- On-demand `POST /api/agent/run?project_id=...` from a "Re-run analysis" button on the dashboard.
+
+**UI:**
+- Drift inbox card already exists — it'll render agent-produced findings alongside R-DATE-1 ones (filtered by `rule_id` prefix in a tag).
+- New "Briefs" card with a persona selector and the per-bullet click-through to the source claim.
+- "Re-run analysis" button with the latest agent_run timestamp + token cost.
+
+**Anti-monitoring guardrails (baked into the prompt + verified post-LLM):**
+- Briefs are scoped to the recipient's own meetings/work.
+- No "responsiveness" / "leaderboard" / individual scoring surfaces.
+- Findings name artifacts and teams, never individuals.
+- Hard contractual posture: husn.io output cannot be used as input to performance / disciplinary decisions (carried in MSA when we get to enterprise sales).
 
 **Exit criteria:**
-1. A generated brief never references a claim that isn't in the source dossier (programmatic check — 0 hallucinations on a 50-brief sample).
-2. Every bullet in the brief is click-throughable to the source artifact + verbatim span.
-3. Briefs render for at least 3 distinct personas (Eng Manager, QA Lead, Security Lead) for a sample project, and the persona variation is meaningful (not the same brief with names swapped).
-4. The brief generator runs against the seeded contradiction and correctly flags it for each persona who needs to know.
+1. Anthropic API key wired in `.env`; agent runs successfully end-to-end on the Project Atlas seeded data.
+2. Programmatic check: agent never cites a `claim_id` that isn't in the input dossier (0 hallucinations on a 20-run sample).
+3. Briefs render for at least 3 distinct personas (Eng Manager, QA Lead, Security Lead) with persona-specific framing — not the same brief with names swapped.
+4. Agent run cost + latency per project logged; cron runs without manual intervention; on-demand button works.
+5. Anti-monitoring guardrails pass an LLM-as-judge check on output: no per-individual responsiveness language detected across a 20-run sample.
 
 ---
 
-### Step 7 — Forecasting & risk model
+### Step 7 — Forecasting & risk
 
-**Goal:** Pattern detection on unresolved drift → predicted operational risk.
-
-**Deliverable:**
-- `risk_signals(id, project_id, kind, score, contributing_findings, computed_at)` — daily roll-up
-- Signals (deterministic first):
-  - Open findings older than N days
-  - Acknowledgment rate per team trending down
-  - Number of unrecorded-decision findings in last 7/14 days
-  - Days since last graph update from key artifacts (e.g. runbook stale)
-- Dashboard: per-project "risk over time" chart, ranked open findings
-- **No individual-level risk score, ever.** Project- and team-level only.
-
-**Effort:** 1–2 weeks.
-
-**Exit criteria:**
-1. Risk signals compute daily without manual intervention.
-2. At least one risk signal correlates visibly with the seeded contradiction journey (signal rises when ack rate stalls; falls when resolved).
-3. No risk signal is computed at the individual level — verified by inspection of signal definitions.
+> **Status: subsumed into Step 6.** The agent surfaces forecast signals (e.g. "this pattern of unrecorded decisions historically precedes launch slip") in the same recommendations stream. A separate ML risk model is deferred until we have a corpus of resolved findings to learn from.
 
 ---
 

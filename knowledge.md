@@ -208,6 +208,7 @@ Sales cycle: 90–120 days enterprise + 30–60 day security review = ~5 months 
 8. **EU AI Act high-risk classification is a coin-flip we don't want to flip.** Product framing must deliberately avoid the monitoring envelope from day one. Once a "responsiveness leaderboard" exists in the UI, it leaks and the EU GTM dies.
 9. **ACV math is borderline.** $75K blended needs editor-seat discipline + a $60K platform floor. Drift to $40K starter-heavy and the sales motion can't pay for itself.
 10. **Champion-dependent revenue.** TPM champions change jobs every 18–24 months. Build a written success-plan handoff at month 9 of every contract.
+11. **Deterministic drift rules are scaffolding, not the moat (added 2026-05-24).** During Step 4 build it became clear that the rule-based approach (R-DATE-1 etc.) hits its ceiling fast: chat messages can't be edited retroactively, so the "auto-close on reconvergence" pattern is brittle; binding-vs-nonbinding language requires reading the conversation; cancelled milestones don't get a delete-event. The agent (Step 6, brought forward) reads the full context and makes those calls. The deterministic substrate stays as input to the agent and as an always-on fallback when the LLM is unavailable — but the moat lives in the agent's judgement, not in additional hand-coded rules.
 
 ---
 

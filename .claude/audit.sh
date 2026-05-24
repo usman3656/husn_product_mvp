@@ -36,6 +36,8 @@ case "$file_path" in
   "${PROJECT_ROOT}/knowledge.md") exit 0 ;;
   "${PROJECT_ROOT}/plan.md") exit 0 ;;
   "${PROJECT_ROOT}/prompt.md") exit 0 ;;
+  "${PROJECT_ROOT}/PROGRESS.md") exit 0 ;;
+  "${PROJECT_ROOT}/docs/"*) exit 0 ;;
 esac
 
 [[ ! -f "$KNOWLEDGE" || ! -f "$PLAN" ]] && exit 0
