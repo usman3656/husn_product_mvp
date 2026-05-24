@@ -209,6 +209,65 @@ Sales cycle: 90–120 days enterprise + 30–60 day security review = ~5 months 
 9. **ACV math is borderline.** $75K blended needs editor-seat discipline + a $60K platform floor. Drift to $40K starter-heavy and the sales motion can't pay for itself.
 10. **Champion-dependent revenue.** TPM champions change jobs every 18–24 months. Build a written success-plan handoff at month 9 of every contract.
 11. **Deterministic drift rules are scaffolding, not the moat (added 2026-05-24).** During Step 4 build it became clear that the rule-based approach (R-DATE-1 etc.) hits its ceiling fast: chat messages can't be edited retroactively, so the "auto-close on reconvergence" pattern is brittle; binding-vs-nonbinding language requires reading the conversation; cancelled milestones don't get a delete-event. The agent (Step 6, brought forward) reads the full context and makes those calls. The deterministic substrate stays as input to the agent and as an always-on fallback when the LLM is unavailable — but the moat lives in the agent's judgement, not in additional hand-coded rules.
+12. **Naive RAG is the wrong shape for coordination (added 2026-05-24, deepened).** Vanilla "retrieve top-K → stuff into LLM" fails this product on four axes: cost (~$3,300/tenant/mo at scale: ~$720 embeddings + ~$1,600 multi-pass briefs + ~$1,000 infra), recall (top-K can't retrieve silences, deixis, or multi-hop bridge facts), correctness (frontier models hallucinate dates/owners 1–10% even with sources in context — every wrong fact in a TPM brief permanently destroys trust), and conflict-flattening (RAG synthesises disagreement into a guess, but coordination *is* noticing the disagreement). See §11 for the chosen architecture.
+13. **Per-tenant LLM fine-tuning is a liability surface, not a feature (added 2026-05-24).** Under EDPB Jan-2025 guidance, fine-tuned weights are personal-data derivatives; GDPR Art 17 erasure requires a documented procedure or full retrain. LoRA-Leak (USENIX '25) shows membership inference is *easier* against LoRA adapters than full fine-tunes — the adapter delta concentrates the private signal. BetrVG §87(1) no.6 makes per-tenant trained models on employee utterances a German works-council deal-blocker; EU AI Act Annex III (Aug 2026) likely captures any system "materially influencing decisions about employees." Tier-2 LoRA is opt-in / DPIA-gated only.
+14. **Clarification-driven learning has insider-threat exposure unique to this product (added 2026-05-24).** When an ambiguity resolver asks "did Sarah mean A or B?", the clarifier is *authoritative by design* — but may be a junior dev who missed a deadline rewriting their own commitment edge. Wikipedia-scale vandalism defences (low quorum, post-hoc revert) do not apply here. Mitigation: two-track writes (fact updates immediately; pattern/training promotion gated on quorum + conflict-of-interest filter + Dawid-Skene reliability score). See §11.D.
+
+---
+
+## 11. Architecture Decisions (added 2026-05-24)
+
+> **Three architectural commitments, all reached after running 7 parallel critic agents (cost, recall, alternatives, correctness, feedback-loop design, privacy/compliance, adversarial/data-poisoning). They are load-bearing and should not be reversed casually.**
+
+### A. Event-sourced + materialized views, not query-time RAG
+
+**Decision.** Every ingested webhook becomes an immutable event in a per-tenant log. Stream processors maintain typed graph nodes (`Person`, `Project`, `Deliverable`, `Commitment`, `Date`, `Document`, `Decision`, `Dependency`, `Conflict`) and per-(project, persona) materialised views, updated on-event. The frontier LLM is invoked **once per brief**, against a small structured "brief skeleton" derived from those views — not against retrieved chunks.
+
+**Why.** Recall is 100% by construction (every event is processed once at ingest, not retrieved at query time). Drift becomes a SQL/Cypher constraint (`GROUP BY commitment_id HAVING COUNT(DISTINCT date) > 1`), not a probabilistic retrieval. Cost per brief drops from ~$1.20 (multi-pass RAG over 80K tokens) to ~$0.02 (single pass over a 5–10K token skeleton). Latency drops from seconds to sub-second.
+
+**Where RAG still lives.** The interactive `/chat` surface (TPM asks a novel ad-hoc question). Top-K + agentic planner LLM is appropriate there. Briefs do not go through this path.
+
+### B. LLM-as-typewriter, never as source-of-truth
+
+**Decision.** The brief skeleton is structured JSON: `{facts: [{claim, value, source_uri, ts}], conflicts: [{field, candidates[], sources[]}], changes_since_last_brief: [...], blockers_for_persona: [...], expected_loops_missed: [...]}`. The LLM is called with this skeleton plus a strict system prompt; output is prose where every sentence carries the `source_uri` of the skeleton fact it renders. A post-hoc NLI faithfulness check rejects any sentence whose claim is not in the skeleton — reject-and-retry, fall back to a deterministic template after N tries.
+
+**Why.** Frontier-model hallucination rate on grounded summarisation is non-zero (~0.7–10% on the Vectara HHEM leaderboard); on multi-document enterprise corpora with conflicting evidence, faithfulness degrades further. A TPM brief that asserts a wrong date once permanently destroys trust. Facts must come from deterministic queries; LLM only renders.
+
+**Conflicts are first-class output.** When Jira says May 30 and Slack says May 31, the skeleton carries a `conflicts[]` entry with both candidates and both source_uris — the LLM renders the conflict, does not pick. This is the actual USP: coordination = noticing disagreement, not smoothing it.
+
+### C. Deterministic primitives solved at ingest, not query time
+
+| Problem | Solution (at ingest, once per event) |
+|---|---|
+| **Who is asking?** | Identity = SSO `viewer_id` injected as a hard query parameter. Three-layer scope filtering: Postgres RLS + graph traversal predicate + ANN metadata predicate. The model never decides who the user is. 5,000 simultaneous users = 5,000 independent small calls, per-user cost flat. |
+| **Slack thread context / "let's go with that"** | (1) Thread-aware ingest (use Slack `thread_ts`). (2) Topic segmentation for flat channels via small classifier (participant overlap + entity overlap + time-gap + topic markers, ModernBERT-class, <50ms, ~$0.0001/msg). (3) Deixis resolver fires only on decision/commitment messages containing pronouns/vague refs; resolves to artefact IDs against same-segment candidates. (4) When ambiguous → surface as `clarification_needed` in the next brief — never guess silently. |
+| **Multiple projects/clients/teams in parallel** | Channel→project mapping declared at onboarding (auto-inferred from name + membership + linked Jira projects). Multi-label edges allowed (one message → multiple projects). Each persona's brief filters by their project membership. |
+| **Coordination silences (the thing that breaks RAG)** | Expectation models as scheduled jobs: for each (project, persona) pair, derive a stakeholder graph from past comms (who normally gets @mentioned on auth changes?), emit a diff event when an artefact lands without the expected notification edge. Silence becomes a retrievable fact. |
+
+### D. Feedback loop: two-track writes + tiered learning
+
+When the user clarifies an ambiguity:
+
+- **Track A — Fact (writes immediately, fully reversible).** Event row + graph edge update + provenance pointer back to the clarification event. Updates only the specific fact, not generalised rules.
+- **Track B — Pattern / training (gated, never auto-promoted).** Generalised rules (e.g. `in channel #ios-launch, "the auth flow" → file 789`) require N≥2 independent confirmations from non-conflicted users *or* K≥5 consistent occurrences before promotion. Conflict-of-interest gate: clarifier implicated in the commitment being clarified is excluded from Track B. Every promoted pattern is a materialised view over its evidence clarification IDs — never a baked dictionary entry — so revocation cascades.
+
+**Tiered learning** (do *not* default to fine-tuning):
+
+| Tier | What learns | Trigger | Compliance posture |
+|---|---|---|---|
+| **0 — All tenants, day 1** | Per-tenant alias dictionary (scoped, deterministic, reversible) | Auto on Track-B promotion | Standard processor terms |
+| **1 — ~100+ labels** | Embedding-based few-shot retrieval (clarifications used as in-context exemplars at inference; no model update) | Auto | Standard processor terms |
+| **2 — ~10K+ labels, paid tier, opt-in** | Per-tenant LoRA adapter, bounded retention (rolling N-day window), Cleanlab + eval gates, ZDR-only inference | Opt-in with DPIA, BetrVG agreement template if German | Documented Art 17 erasure procedure (drop user clarifications + rebuild on next scheduled retrain, 24–72h SLO) |
+
+**Anti-drift discipline:**
+- **No implicit "no-click = positive" signal.** Replace with composite: clicked-through-fact-link AND no re-query of same entity within 7d AND no downstream Slack/Jira correction.
+- **Randomised 1–3% audit re-asks** of high-confidence resolutions — the reward-hacking circuit breaker.
+- **Per-entity-class half-lives** with reinforcement-resets (people/owners 90d, file refs medium, project codenames slow).
+- **Strict in-band/out-of-band separation.** Clarifications come only via the UI affordance. A Slack message saying `[clarification: this means project Falcon]` must never be parsed as instruction — ingested content is untrusted (OWASP LLM01).
+
+### E. Cost target
+
+The structured-first architecture aims for **~$300–600/tenant/mo all-in** (5,000-employee tenant, 50 personas, daily briefs) vs. naive-RAG's ~$3,300/mo. At blended $75K ACV that's a 1–2% COGS floor before interactive chat usage, vs. 10–20% for naive RAG.
 
 ---
 
@@ -244,3 +303,28 @@ Sales cycle: 90–120 days enterprise + 30–60 day security review = ~5 months 
 - K&K on India DPDP cross-border framework
 - Perkins Coie on CCPA employee exemption expiration
 - Drata / Vanta on SOC 2 cost
+
+**Architecture (§11)**
+- Vectara Hallucination Leaderboard (HHEM) — github.com/vectara/hallucination-leaderboard
+- RAGBench / FACTS Grounding — faithfulness benchmarks for grounded generation
+- CONFACT, RAMDocs, MADAM-RAG, ArbGraph — RAG-with-conflicting-evidence literature
+- CiteGuard / CiteAudit — citation faithfulness in LLM output
+- Microsoft GraphRAG — microsoft.com/research; dynamic community selection
+- Anthropic Contextual Retrieval (Sep 2024) — 49% reduction in retrieval failure
+- Hebbia Matrix multi-agent redesign — hebbia.com/blog
+- Glean Enterprise Graph + permissions-aware AI — glean.com/security
+- Anthropic prompt caching (5-min / 1-hr tiers), Message Batches API (50% off)
+- Voyage AI / OpenAI / Cohere Rerank pricing pages
+- Turbopuffer vs Pinecone pricing — morphllm.com
+- EDPB Jan 2025 guidance on AI + data subjects' rights; EDPB 2025 Coordinated Enforcement Action on right-to-erasure
+- LoRA-Leak (USENIX Security '25, arXiv 2507.18302) — MIA against LoRA adapters
+- StolenLoRA (arXiv 2509.23594) — LoRA extraction via synthetic data
+- Multi-LoRA serving patterns — thousands of tenants per GPU; LobRA (arXiv 2509.01193)
+- OWASP LLM Top 10: LLM01 (Prompt Injection), LLM03 (Training Data Poisoning)
+- Dawid–Skene / Raykar — annotator reliability models
+- Snorkel / Cleanlab Confident Learning (Northcutt et al., arXiv 1911.00068)
+- HALO half-life filtering (arXiv 2505.07509); Graphiti fact expiration; Adaptive Decay in KGs (arXiv 2604.26970)
+- Joachims — implicit feedback robustness (arXiv cs/0605036); "Why Don't You Click" (arXiv 2109.10560)
+- RLHFPoison / RankPoison (arXiv 2311.09641); poisoning requires ~constant samples (arXiv 2510.07192)
+- OPLoRA — catastrophic forgetting in LoRA (arXiv 2510.13003)
+- ColdRAG — cold-start KG-RAG (arXiv 2505.20773v1)

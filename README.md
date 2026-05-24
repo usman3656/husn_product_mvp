@@ -1,6 +1,8 @@
 # husn.io
 
-Coordination layer for cross-functional enterprise programs. See `plan.md` for the build plan and `knowledge.md` for the research that shapes it.
+Coordination layer for cross-functional enterprise programs. See `plan.md` for the build plan, `knowledge.md` for the research that shapes it (incl. §11 architecture decisions), and `PROGRESS.md` for current state.
+
+**Architecture in one line.** Event-sourced ingest → typed graph + per-(project, persona) materialized views → deterministic brief skeleton → LLM-as-typewriter (renderer only, NLI-verified) → per-persona briefs with every sentence source-linked. RAG only powers the future `/chat` surface; never the brief path.
 
 ## Quick start (local)
 

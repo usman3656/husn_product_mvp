@@ -1,4 +1,5 @@
 import { ApiHealth } from "@/components/api-health";
+import { BriefsCard } from "@/components/briefs-card";
 import { ClaimsCard } from "@/components/claims-card";
 import { DriftCard } from "@/components/drift-card";
 import { GooglePanel } from "@/components/google-panel";
@@ -21,7 +22,18 @@ export default function Home() {
             Operational coordination layer. Step 1 — read-only connector dashboard.
           </p>
         </div>
-        <nav className="text-xs">
+        <nav className="flex items-center gap-2 text-xs">
+          <a
+            href="/chat"
+            className="rounded border px-3 py-1.5"
+            style={{
+              borderColor: "#6f7bff66",
+              color: "#a5b4fc",
+              background: "#6f7bff11",
+            }}
+          >
+            Ask the AI TPM →
+          </a>
           <a
             href="/connections"
             className="rounded border px-3 py-1.5"
@@ -42,6 +54,10 @@ export default function Home() {
 
       <section className="mb-6">
         <DriftCard />
+      </section>
+
+      <section className="mb-6">
+        <BriefsCard />
       </section>
 
       <section className="mb-8">

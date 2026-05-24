@@ -6,10 +6,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from husn.core.config import get_settings
 from husn.core.logging import configure_logging, log
 from husn.routers import (
+    agent,
     artifacts,
     auth_google,
     auth_jira,
     auth_slack,
+    chat,
     claims,
     connections,
     findings,
@@ -54,3 +56,5 @@ app.include_router(artifacts.router)
 app.include_router(graph.router)
 app.include_router(claims.router)
 app.include_router(findings.router)
+app.include_router(agent.router)
+app.include_router(chat.router)

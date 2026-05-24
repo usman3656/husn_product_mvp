@@ -26,14 +26,32 @@
 | **3 — Claims (deterministic)** | 🟡 partial — Slack + Jira only | 7 extractors with evidence anchors fire on Slack messages + Jira issues. Google email / doc / sheet content is normalized but **no extractors run on it yet** (would need ~3 new extractor classes; trivial work but not yet shipped). |
 | **4 — Drift (deterministic)** | 🟡 partial — kept | R-DATE-1 shipped + Drift inbox UI. Remaining rules (R-DATE-2, R-DECISION-1, R-OWNER-1) + auto-close **skipped per 2026-05-24 pivot**. R-DATE-1 stays as always-on fallback. |
 | **5 — Propagation** | ⛔ subsumed | Folded into Step 6. Agent will decide who needs to know. |
-| **6 — AI TPM agent** | 🚧 starting | Brought forward + expanded to cover findings + briefs + recommendations. See `## What's next`. |
-| **7 — Forecasting** | ⛔ subsumed | Folded into Step 6 recommendations stream. |
+| **6 — AI TPM agent (brief skeleton + LLM-as-typewriter)** | 🚧 starting | Rewritten 2026-05-24 v2: deterministic skeleton builder → Anthropic renderer → NLI verifier → persist. RAG NOT in brief path (chat-only). See `## What's next`. |
+| **7 — Feedback loop (clarifications + two-track writes)** | 📋 planned | Repurposed slot. Track A fact-writes immediate; Track B pattern promotions gated on quorum + COI + Dawid-Skene reliability. |
+| **8 — Tiered learning (Tier 0 dict only in MVP)** | 📋 planned | Tier 0 alias dictionary. Tier 1 (few-shot) deferred; Tier 2 (LoRA) opt-in / DPIA-only, out of MVP. |
 | **Connections management** | ✅ shipped | `/connections` page lists every source connection with token health, scope count, artifact count, last-sync time. Disconnect wipes the token + allowlist but keeps historical data. |
 | **Audit watcher** | ✅ shipped | Host-side Python daemon polls the project tree every 4s and runs `.claude/audit.sh` on changes. Survives terminal close, not reboot. |
 
 ---
 
 ## Pivot log (newest first)
+
+### 2026-05-24 (v2) — Architecture deepening: brief skeleton + LLM-as-typewriter + two-track feedback
+
+**Decision.** Before any Step 6 code lands, locked in three load-bearing architecture commitments after a 7-agent parallel critique pass (cost / recall / alternatives / correctness / feedback-loop / privacy / adversarial). Repurposed Steps 7 and 8 from `subsumed` to cover feedback-loop and tiered-learning.
+
+**Three commitments:**
+1. **Event-sourced + materialized views, not query-time RAG.** Briefs are precomputed against a structured per-(project, persona) view. RAG is reserved for the future `/chat` surface only.
+2. **LLM-as-typewriter, never as source-of-truth.** Briefs render from a deterministic structured "brief skeleton" (facts, conflicts, changes, blockers, missed-loops). NLI post-check rejects any rendered sentence whose claim isn't in the skeleton.
+3. **Tiered learning, default deterministic.** Tier 0 (alias dict) only in MVP. Tier 1 (few-shot) deferred. Tier 2 (per-tenant LoRA) opt-in / DPIA-gated.
+
+**Why.** Naive RAG fails this product on cost (~$3,300/tenant/mo vs ~$300–600 target), recall (top-K can't retrieve silences or deixis), correctness (1–10% hallucination floor permanently destroys TPM trust), and conflict-flattening (RAG smooths disagreement into a guess, but coordination *is* noticing disagreement). Per-tenant fine-tuning is a GDPR Art 17 + BetrVG + EU AI Act Annex III liability surface, not a feature.
+
+**Schema additions queued for Step 6:** `briefs`, `agent_runs`, `topic_segments`, `deixis_resolutions`, `expectation_misses`.
+
+**Schema additions queued for Step 7:** `clarifications`, `clarification_quorum`, `pattern_candidates`, `user_reliability`.
+
+**See** `plan.md` Steps 6, 7, 8 and `knowledge.md` §11 for the full design.
 
 ### 2026-05-24 — Skip remaining deterministic rules; bring Step 6 (LLM agent) forward
 
@@ -50,33 +68,46 @@
 
 ---
 
-## What's next (Step 6 build plan)
+## What's next (Step 6/7/8 build plan, post-architecture-pivot)
 
-Open tasks (set up but not yet started):
+Open tasks (re-scoped to new architecture):
 
 | # | Subject | State |
 |---|---|---|
-| 45 | Re-scope: skip remaining deterministic rules; plan agent step | 🟡 in progress (this commit covers the docs portion) |
-| 46 | briefs schema + migration | pending |
-| 47 | Agent context retriever (per project) | pending |
-| 48 | Claude client + prompt + JSON-output guard | pending |
-| 49 | Agent loop: persist findings + briefs | pending |
+| 45 | Architecture pivot v2 — brief skeleton + LLM-as-typewriter | 🟡 in progress (this commit is the docs portion) |
+| 46 | `briefs` + `agent_runs` schema (Alembic `0006_agent.py`) | pending |
+| 47 | Skeleton builder (`husn.agent.skeleton.build_skeleton(project_id, persona, viewer_id) -> Skeleton`) — pure function, no LLM | pending |
+| 48 | Anthropic renderer + strict system prompt + JSON-output schema | pending — needs API key |
+| 49 | NLI verifier + reject-and-retry + deterministic-template fallback | pending |
+| 50 | Brief persistence + cron + on-demand endpoint with `viewer_id` scope | pending |
+| 51 | Dashboard: extend Drift inbox + add Briefs card with persona selector + identity-scope mock | pending |
+| 52 | `topic_segments` + topic segmentation classifier (Slack flat channels) | pending — Step 6 dep |
+| 53 | `deixis_resolutions` + deixis resolver (decision/commitment messages only) | pending — Step 6 dep |
+| 54 | `expectation_misses` + absence detector cron | pending — Step 6 dep |
+| 55 | `clarifications` + `pattern_candidates` + `user_reliability` schema (Step 7) | pending |
+| 56 | Clarification UI + Track A fact-write path | pending |
+| 57 | Track B promotion gate (quorum + COI + Dawid-Skene) + cascading rollback | pending |
+| 58 | Tier 0 alias dictionary + auto-mining of rename events (Step 8) | pending |
 
 (Earlier tasks 39-44 covered Step 4 ship; task 38 was Step 3 e2e verify.)
 
 ### Pending user actions
 
 1. **Paste Anthropic API key** — `sk-ant-api03-...`. I'll save to `.env` (gitignored). Rotate after we're done since chat logs are a risk.
-2. (Already chosen) Triggering pattern: **scheduled cron every 5 min + on-demand "Re-run analysis" button**.
-3. (Already chosen) Agent output v0: **findings + per-persona briefs** (recommendations later).
+2. (Already chosen) Triggering pattern: **scheduled cron every 5 min per (project, persona) + on-demand "Re-run analysis" button + webhook-driven on significant events**.
+3. (Already chosen) Brief output v0: **per-persona briefs with conflicts rendered side-by-side**. Agent findings written into existing `findings` table with `AGENT-FINDING-*` prefix.
 
 ### Next coding session order
 
-1. **briefs + agent_runs schema** (task 46) — Alembic migration `0006_agent.py`.
-2. **Context retriever** (task 47) — `husn.agent.context.build_dossier(project_id) -> dict`. Pure function, easy to test.
-3. **Anthropic client + system prompt** (task 48) — once user provides API key. Includes anti-hallucination check (every cited claim_id exists in input).
-4. **Persistence + cron + on-demand endpoint** (task 49) — agent_runs row per run; new findings written into existing `findings` table with `rule_id="AGENT-FINDING-*"`; briefs written into new `briefs` table.
-5. **Dashboard surfaces** — extend Drift inbox to render agent findings; add new "Briefs" card with persona selector.
+1. **Schema** (task 46) — `briefs`, `agent_runs`, `topic_segments`, `deixis_resolutions`, `expectation_misses` in one migration. `viewer_id` on `briefs`.
+2. **Skeleton builder** (task 47) — pure function returning structured JSON: `{viewer_id, persona, project_id, as_of, facts[], conflicts[], changes_since_last_brief[], blockers_for_persona[], expected_loops_missed[]}`. No LLM. Heavily tested in isolation.
+3. **Renderer** (task 48) — Anthropic SDK call. System prompt forbids citing claim_ids not in skeleton; forbids picking a side on conflicts; forbids per-individual language. JSON output schema enforced.
+4. **Verifier** (task 49) — NLI check on each output sentence vs its cited claim_id's source span. Reject + retry max 2. Fallback to deterministic template.
+5. **Persistence + cron + on-demand + identity-scope** (task 50) — agent_runs row per run; briefs with `viewer_id`; cron per (project, persona); RLS check enforced.
+6. **Dashboard** (task 51) — Briefs card with persona selector; mock `viewer_id` in URL pre-SSO; conflicts as side-by-side candidate cards.
+7. **Ingest-time deps** (tasks 52-54) — topic segmentation, deixis resolver, absence detector. These power the skeleton.
+8. **Feedback loop** (tasks 55-57, Step 7) — clarifications schema, UI, Track A/B, rollback.
+9. **Tier 0 dictionary** (task 58, Step 8) — populated by Step 7 promotions + auto-mined renames.
 
 ---
 
@@ -100,7 +131,12 @@ curl http://localhost:8000/health    # {"status":"ok","version":"0.0.1"}
 | `normalize_graph` | :00 :15 :30 :45 | live |
 | `extract_claims` | :05 :20 :35 :50 | live (Slack + Jira only — Google not yet wired) |
 | `evaluate_drift` (R-DATE-1) | :10 :40 | live |
-| `agent_analyze` | every 5 min | **planned (Step 6)** |
+| `agent_brief` (per project × persona, skeleton + render + verify) | every 5 min | **planned (Step 6)** |
+| `topic_segment` (Slack flat channels) | on-message | **planned (Step 6 dep)** |
+| `deixis_resolve` (decision/commitment messages only) | on-message | **planned (Step 6 dep)** |
+| `expectation_miss` (absence detector) | every 10 min | **planned (Step 6 dep)** |
+| `pattern_promote` (Track B quorum check) | every 30 min | **planned (Step 7)** |
+| `audit_reask` (randomised 1–3% re-asks) | daily | **planned (Step 7)** |
 
 ### Current data snapshot (last known)
 
@@ -142,6 +178,7 @@ Keep this file under ~300 lines. Truncate `Recent activity` to last 30 entries.
 
 ## Recent activity (newest first)
 
+- **2026-05-24** — Docs-only pivot v2: architecture deepening (brief skeleton + LLM-as-typewriter + two-track feedback + Tier-0-only learning). 7-agent parallel critic pass ratified. `knowledge.md` §11 added with the architecture decisions and §8 holes 12–14 added with the risks the critics surfaced. `plan.md` Step 6 fully rewritten; Steps 7 and 8 repurposed from `subsumed` slots to cover feedback-loop and tiered-learning. No code changes — Step 6 build will start from the new design.
 - **2026-05-24** — Commit `50e5910`: audit-watcher daemon. Host-side Python poller (no deps), 4s interval, calls existing `.claude/audit.sh` on changed files. Started in background (`pid` in `/tmp/husn-audit-watcher.pid`). Storms capped at 5 audits/tick.
 - **2026-05-24** — Commit `e5d2d39`: Google connector end-to-end. OAuth 2.0 + offline access, Gmail + Drive + Docs + Sheets pulled, allowlist UI with Drive folder TREE picker (lazy-loaded subfolder expand, multi-select at any depth), `/connections` management page with disconnect, delta sync via Gmail historyId + Drive startPageToken cursors stored on `connections.extra`. Bootstrapped against the user's `husunn.ai@gmail.com` workspace: 12 docs ("Project Atlas — Launch Plan", "QA Regression Plan", etc.), 8 sheets ("Risk Register", "Cutover Task Tracker"), 6 emails ("Cutover window approval — Atlas → June 10 GA"). Two bug fixes inline: mention dedup + ON CONFLICT, per-row rollback in normalize.
 - **2026-05-24** — Plan pivot: bring Step 6 forward, skip remaining deterministic rules. `plan.md` + `knowledge.md` + this file updated. Awaiting Anthropic API key from user.

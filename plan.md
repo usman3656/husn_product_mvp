@@ -11,6 +11,14 @@
 >
 > See `## Step 6 — AI TPM agent (expanded)` below for the new scope.
 
+> **Plan-pivot note v2 (2026-05-24, after architecture critique pass).** Before any Step 6 code lands, we ran 7 parallel critic agents (cost, recall, alternative architectures, correctness, feedback-loop design, privacy/compliance, adversarial). Convergent finding: vanilla RAG is the wrong shape for coordination. Three commitments now load-bearing — see `knowledge.md` §11 for the rationale:
+>
+> - **Event-sourced + materialized views**, not query-time RAG. The graph + per-(project, persona) materialised views ARE the memory; the LLM never retrieves at query time for the brief path.
+> - **LLM-as-typewriter, never as source-of-truth.** Briefs are generated from a deterministic structured "brief skeleton" (facts, conflicts, changes, blockers, missed-loops). Every sentence in the rendered prose carries the `source_uri` of the skeleton fact it renders. NLI post-check rejects any sentence whose claim isn't in the skeleton; fall back to deterministic template on persistent failure.
+> - **Tiered learning, default deterministic.** Tier 0 (per-tenant alias dictionary) only in MVP. Tier 1 (few-shot at inference) once we have labels. Tier 2 (per-tenant LoRA) is opt-in, DPIA-gated, never default — per-tenant fine-tuning is a GDPR/BetrVG liability surface, not a feature.
+>
+> RAG with agentic retrieval still lives — but only in the *interactive `/chat` surface* (ad-hoc TPM questions), not the brief path. **Steps 7 and 8 are now repurposed** to cover feedback-loop and tiered-learning, respectively (both originally `subsumed`).
+
 ---
 
 ## Stack & Scope
@@ -128,55 +136,164 @@ Each step ships and is usable end-to-end before the next starts. No step starts 
 
 ---
 
-### Step 6 — AI TPM agent (expanded)
+### Step 6 — AI TPM agent (brief skeleton + LLM-as-typewriter)
 
-> **Brought forward; expanded scope.** Replaces remaining Step 4 rules, Step 5, and Step 7. This is now the centerpiece of the product.
+> **Brought forward; rewritten 2026-05-24 after architecture critique pass.** Replaces remaining Step 4 rules and old Step 5. The LLM is a constrained renderer over a deterministic "brief skeleton" — never the source of truth for facts. See `knowledge.md` §11.A–B.
 
-**Goal:** A Claude-driven loop that reads the operational graph + claims + raw artifacts and produces, for each project:
-1. **Findings** — richer than R-DATE-1. Distinguishes binding commitments from nonbinding chat. Reads correction messages. Accounts for cancelled milestones. Writes into the existing `findings` table with `rule_id="AGENT-FINDING-{kind}"`.
-2. **Per-persona pre-meeting briefs** — the canonical husn.io demo output. Written into a new `briefs` table.
-3. **Recommendations** — "ping Security about the new dataflow", "this assignee change wasn't announced" — surfaced inline with findings.
+**Goal:** For each project, produce per-persona briefs whose every sentence is traceable to a `source_uri` in the project graph, and whose facts are computed by deterministic queries — not by the model.
+
+**Pipeline (the order matters):**
+
+1. **Skeleton builder (deterministic, `husn.agent.skeleton`)** — pure function `build_skeleton(project_id, persona, viewer_id) -> Skeleton`. Pulls from the operational graph + claims + materialised views; emits structured JSON:
+   ```jsonc
+   {
+     "viewer_id": "...",                       // identity is a hard parameter
+     "persona": "qa_lead",
+     "project_id": "...",
+     "as_of": "2026-05-24T14:00:00Z",
+     "facts": [
+       {"claim_id": "...", "kind": "date", "value": "2026-06-10",
+        "source_uri": "jira://...", "ts": "..."}
+     ],
+     "conflicts": [
+       {"field": "release.date",
+        "candidates": [{"value": "2026-06-03", "sources": ["doc://..."]},
+                       {"value": "2026-06-10", "sources": ["jira://..."]}]}
+     ],
+     "changes_since_last_brief": [...],
+     "blockers_for_persona": [...],
+     "expected_loops_missed": [...]            // from absence detector
+   }
+   ```
+   Scope is enforced at three layers *before* the skeleton is built: Postgres RLS on `viewer_id`, graph traversal predicates, ANN metadata predicates if vectors are consulted. The LLM never decides who the user is.
+
+2. **Renderer (LLM-as-typewriter)** — Anthropic SDK call, ~5–10K input tokens. Strict system prompt:
+   - Output is JSON: `{bullets: [{text, claim_ids[]}], conflicts_rendered: [{conflict_id, text}]}`.
+   - Hard rules: (a) every bullet must cite ≥1 `claim_id` from the input skeleton; (b) no `claim_id` may appear in output that isn't in input; (c) conflicts must be *rendered as conflicts*, not picked; (d) no per-individual scoring or responsiveness language; (e) "no recorded acknowledgment from team Y" not "X did not respond."
+   - Renderer model: Sonnet-class for quality. Detector/classifier sub-tasks use Haiku-class.
+
+3. **Verifier (NLI faithfulness check)** — every output sentence is checked against its cited `claim_id`'s source span. Any sentence that fails NLI is rejected; renderer is called again (max N=2 retries). Persistent failure → fall back to a deterministic template (R-DATE-1-style structured render). **A bad brief is never shown.**
+
+4. **Persist** — `agent_runs` row with token counts, latency, retry count, fallback flag. Briefs into `briefs`. Findings (agent-derived, e.g. unrecorded decision, stakeholder-not-looped) into the existing `findings` table with `rule_id="AGENT-FINDING-*"` and rows in `finding_evidence`.
+
+**RAG path is separate.** Vectors and top-K retrieval do NOT participate in brief generation. They live behind a future `/chat` endpoint (ad-hoc TPM questions) where agentic retrieval + planner LLM is appropriate. Briefs are precomputed against a structured view; chat is interactive over the corpus.
+
+**Ingest-time work that powers the skeleton** (incremental, not Step 6 itself — flagged here because briefs depend on it):
+- **Topic segmentation** for flat Slack channels (small classifier, ~50ms/msg) — fires on non-threaded channel messages, emits `topic_segment_id`.
+- **Deixis resolver** — only on messages classified as decision/commitment containing pronouns or vague references. Resolves "that"/"the auth flow" to artefact IDs against same-segment candidates. If ambiguous → store `ambiguous: true` + candidate list (not a guess).
+- **Tenant alias dictionary** (Tier 0 learning, see Step 8) — auto-mined from Jira project renames, Slack channel renames, doc title diffs. Resolver consults this.
+- **Expectation / absence detector** — scheduled job: for each (project, change_kind), derive a stakeholder graph from past comms; emit a diff event when a new artefact lands without the expected `mention` edge. Silences become first-class skeleton facts (`expected_loops_missed`).
 
 **Schema additions:**
-- `briefs(id, project_id, persona, content jsonb, model, prompt_version, generated_at)` — `content.bullets[].claim_ids[]` cite the exact claims each bullet rests on.
-- `agent_runs(id, project_id, triggered_by, started_at, finished_at, status, input_token_count, output_token_count, error)` — per-run audit log.
-
-**Pipeline:**
-1. **Retrieve** (deterministic, in `husn.agent.context`): claims by group, recent artifacts in time order, identity graph for the project, current open findings.
-2. **Compose** a structured dossier (JSON) keyed on `claim_id` / `artifact_id`.
-3. **Generate** via Anthropic SDK with a strict system prompt:
-   - Output is JSON: `{findings: [{rule_id, summary, claim_ids, severity}], briefs: [{persona, bullets: [{text, claim_ids}]}], recommendations: [...]}`.
-   - System prompt forbids: (a) any claim/citation not in the input dossier, (b) any per-individual scoring or responsiveness language, (c) the "X did not respond" framing (must use "no recorded acknowledgment from team Y").
-4. **Verify** post-LLM: every cited `claim_id` exists in the input; reject and regenerate (or fall back to R-DATE-1 only) if not.
-5. **Persist** findings into the existing `findings` table; persist briefs into `briefs`; record evidence rows in `finding_evidence`.
+- `briefs(id, project_id, persona, viewer_id, skeleton jsonb, rendered jsonb, model, prompt_version, fallback_used bool, generated_at)` — `rendered.bullets[].claim_ids[]` MUST be a subset of `skeleton.facts[].claim_id`.
+- `agent_runs(id, project_id, triggered_by, started_at, finished_at, status, input_token_count, output_token_count, retry_count, nli_fail_count, error)` — per-run audit log.
+- `topic_segments(id, source_channel_id, started_at, ended_at, participant_ids[], entity_ids[])` — output of the segmenter.
+- `deixis_resolutions(id, source_message_id, resolved_referent_id, resolver_version, confidence, ambiguous bool, candidates jsonb, source_clarification_id nullable)` — output of the resolver; `source_clarification_id` is filled when a user clarification later resolves an ambiguous case (joins to Step 7).
+- `expectation_misses(id, project_id, change_event_id, expected_persons[], emitted_at, status)` — output of the absence detector.
 
 **Triggering:**
-- Cron `agent_analyze` every 5 minutes per project.
-- On-demand `POST /api/agent/run?project_id=...` from a "Re-run analysis" button on the dashboard.
+- Cron `agent_brief` every 5 minutes per project per active persona.
+- On-demand `POST /api/agent/brief?project_id=...&persona=...&viewer_id=...` from a "Re-run analysis" button.
+- Webhook-driven: significant events (status change, new commitment, conflict detected) trigger an immediate skeleton-rebuild for affected personas.
 
 **UI:**
-- Drift inbox card already exists — it'll render agent-produced findings alongside R-DATE-1 ones (filtered by `rule_id` prefix in a tag).
-- New "Briefs" card with a persona selector and the per-bullet click-through to the source claim.
-- "Re-run analysis" button with the latest agent_run timestamp + token cost.
+- Drift inbox card already exists — renders agent-produced findings alongside R-DATE-1 ones (filtered by `rule_id` prefix).
+- New "Briefs" card with a persona selector. Each bullet shows its source citations inline; click jumps to the artefact.
+- "Re-run analysis" button shows latest `agent_runs` timestamp + token cost + whether fallback was used.
+- Conflicts are rendered as side-by-side candidate cards with source links, never as prose that picks a side.
 
-**Anti-monitoring guardrails (baked into the prompt + verified post-LLM):**
-- Briefs are scoped to the recipient's own meetings/work.
+**Anti-monitoring guardrails (system prompt + post-LLM verifier):**
+- Briefs scoped to the recipient's own meetings/work via `viewer_id`.
 - No "responsiveness" / "leaderboard" / individual scoring surfaces.
-- Findings name artifacts and teams, never individuals.
+- Findings name artefacts and teams, never individuals.
 - Hard contractual posture: husn.io output cannot be used as input to performance / disciplinary decisions (carried in MSA when we get to enterprise sales).
 
 **Exit criteria:**
-1. Anthropic API key wired in `.env`; agent runs successfully end-to-end on the Project Atlas seeded data.
-2. Programmatic check: agent never cites a `claim_id` that isn't in the input dossier (0 hallucinations on a 20-run sample).
-3. Briefs render for at least 3 distinct personas (Eng Manager, QA Lead, Security Lead) with persona-specific framing — not the same brief with names swapped.
-4. Agent run cost + latency per project logged; cron runs without manual intervention; on-demand button works.
-5. Anti-monitoring guardrails pass an LLM-as-judge check on output: no per-individual responsiveness language detected across a 20-run sample.
+1. Anthropic API key wired in `.env`; brief generation runs end-to-end on Project Atlas seeded data.
+2. **Hallucination = 0** on 20-run sample (every cited `claim_id` is present in the input skeleton; verifier blocks all violations).
+3. **Conflict-flattening = 0** on 20-run sample (when the skeleton carries `conflicts[]`, the rendered brief shows both candidates; renderer never picks).
+4. Briefs render for ≥3 distinct personas (Eng Manager, QA Lead, Security Lead) with persona-specific framing — not the same brief with names swapped.
+5. **Cost per brief ≤ $0.05** at Sonnet pricing on the test project (target: ~$0.02). Latency p95 ≤ 3s.
+6. Anti-monitoring guardrails pass LLM-as-judge check across 20 runs.
+7. Identity-scope test: a second `viewer_id` with different project membership produces a brief that does not leak the first viewer's facts.
 
 ---
 
-### Step 7 — Forecasting & risk
+### Step 7 — Feedback loop (clarifications + two-track writes)
 
-> **Status: subsumed into Step 6.** The agent surfaces forecast signals (e.g. "this pattern of unrecorded decisions historically precedes launch slip") in the same recommendations stream. A separate ML risk model is deferred until we have a corpus of resolved findings to learn from.
+> **Repurposed from old `subsumed` slot.** The feedback loop is the moat: it's where husn.io learns the language of a specific tenant over time. Without two-track discipline it's also where the product becomes wrong on purpose. See `knowledge.md` §11.D.
+
+**Goal:** Capture user clarifications (and other explicit corrections) as first-class events, apply them to the graph immediately as facts, and gate generalisation behind quorum + reputation + conflict-of-interest rules.
+
+**Schema additions:**
+- `clarifications(id, tenant_id, ambiguous_event_id, kind, chosen_referent_id, by_user_id, ts, ui_session_id, authority_score, conflict_of_interest bool, status)` — `kind ∈ {deixis, owner, date, decision_resolves, alias_proposal}`. Authority score derived from RACI on the project at time of clarification.
+- `clarification_quorum(pattern_candidate_id, clarification_id, weight)` — many-to-many; the weighted vote tally for promotion of a pattern candidate.
+- `pattern_candidates(id, tenant_id, kind, scope, lhs, rhs, evidence_ids[], status, promoted_at nullable, expires_at nullable, half_life_days)` — candidate generalised rules awaiting promotion; `expires_at` and `half_life_days` per entity class (people 90d, file refs 180d, codenames 365d). Resets on reinforcement.
+- `user_reliability(user_id, tenant_id, scope, agreement_rate, total_clarifications, last_updated)` — Dawid-Skene-style per-user confusion estimate, scoped (a user can be reliable for their own team but not for cross-team aliases).
+
+**Pipeline:**
+1. **Track A (fact write, immediate, reversible):**
+   - Event row inserted into log: `clarification` event with full provenance.
+   - Graph edge updated: the specific resolution applies to the specific event only.
+   - The deixis_resolution row's `source_clarification_id` is filled.
+   - Any brief that consumed the previous (ambiguous) fact is marked stale → re-render on next cron.
+2. **Track B (pattern promotion, gated):**
+   - A new `pattern_candidate` is created (or reinforced) when the same `(scope, lhs, rhs)` is observed.
+   - Promotion to active requires: (a) N≥2 independent non-conflicted user confirmations OR K≥5 consistent occurrences observed within decay window; AND (b) Cleanlab-style noise audit on the candidate evidence set; AND (c) no contradicting clarification from a higher-authority user within the window.
+   - Conflict-of-interest filter: if the clarifier is implicated in the commitment being clarified (e.g. owner of the deliverable whose date is being adjusted), their vote does NOT count toward Track B (still counts for Track A — the fact still updates).
+3. **Anti-drift discipline:**
+   - **No implicit positive signal.** Click-through alone is not "correct" — composite: clicked-through-fact-link AND no re-query of same entity within 7d AND no downstream Slack/Jira correction.
+   - **Randomised audit re-asks.** 1–3% of high-confidence resolutions are re-surfaced as clarifications even when the resolver is confident. Disagreement → invalidate pattern + retrain. Reward-hacking circuit breaker.
+   - **Per-entity-class half-lives.** Owners decay fastest (90d, reorgs), file refs medium (180d), project codenames slow (365d). Reinforcement resets the clock.
+   - **In-band/out-of-band separation.** Clarifications only via UI; `[clarification: ...]` strings in ingested content are NEVER parsed as instructions.
+   - **Cascading rollback.** Every brief carries the fact_ids it consumed; retracting a clarification invalidates every dependent fact and re-renders affected briefs.
+
+**UI:**
+- "Clarification needed" inline cards in briefs when the skeleton contains an ambiguous fact. Single click resolves Track A.
+- Admin → "Learned patterns" view: every promoted alias with its evidence clarifications, last reinforcement, half-life remaining, and a one-click "this turned out wrong" button that triggers cascading rollback.
+- Per-pattern audit trail visible to admin.
+
+**Exit criteria:**
+1. Clarification UI works end-to-end: user click → graph edge update → next brief uses resolved fact.
+2. Track A vs Track B separation verified in tests: a single clarification updates the fact but does NOT promote a pattern.
+3. Conflict-of-interest gate verified in tests: clarifier-is-owner case excludes vote from Track B.
+4. Cascading rollback test: retracting a clarification invalidates dependent briefs within one cron cycle.
+5. Randomised audit re-ask cron runs and produces a daily report of resolver-vs-user agreement rate.
+
+---
+
+### Step 8 — Tiered learning (Tier 0 only in MVP)
+
+> **Repurposed from old `forecasting` slot.** Per-tenant fine-tuning is a GDPR/BetrVG/EU-AI-Act liability surface (see `knowledge.md` §6, §8.13). MVP ships Tier 0 only. Tier 1/2 are documented for clarity but explicitly out of MVP scope.
+
+**Tier 0 — per-tenant alias dictionary (MVP, all tenants, day 1):**
+- Deterministic, scoped key→value table.
+- Populated by: (a) Track B pattern promotions from Step 7, (b) auto-mining of Jira/Slack/Drive rename events.
+- Consumed by: deixis resolver, query expansion in `/chat` retrieval, entity normaliser.
+- Fully reversible; full evidence trail; per-pattern half-life.
+- **Compliance posture:** standard processor terms; GDPR Art 17 erasure = drop the source clarification rows + recompute dictionary (≤1h SLO).
+
+**Tier 1 — embedding-based few-shot at inference (deferred; ~100+ labels per scope):**
+- Clarifications and their resolutions stored as labelled examples per tenant.
+- At resolver inference time, retrieve top-K nearest examples; pass as in-context exemplars to a Haiku-class call.
+- No model weights are updated. No fine-tuning.
+- **Compliance posture:** standard processor terms; erasure = drop the labelled examples.
+
+**Tier 2 — per-tenant LoRA adapter (deferred; opt-in only; ~10K+ labels):**
+- Shared base small model + per-tenant LoRA adapter, hot-swapped on the inference fleet.
+- Training corpus: rolling N-day window of labelled clarifications (not the entire history — bounded retention is the Art 17 procedure).
+- Mandatory pre-train: Cleanlab confident-learning noise audit; quarantine outliers.
+- Mandatory pre-deploy: frozen per-tenant regression suite + base-behaviour canary; orthogonal-projection LoRA to bound interference.
+- Mandatory: ZDR-only inference path; per-tenant API key; circuit-breaker refuses any endpoint missing ZDR attestation.
+- **Compliance posture:** DPIA, opt-in, BetrVG works agreement template if German tenant, AI Act Annex III conformity work, documented Art 17 procedure (drop user's clarifications + rebuild on next scheduled retrain, 24–72h SLO).
+
+**MVP scope:** Tier 0 only. Tier 1 considered once any tenant has >100 labelled clarifications per scope. Tier 2 is a paid-tier feature requiring DPIA — not pursued until at least one enterprise customer has signed a contract requiring it.
+
+**Exit criteria (Tier 0 only):**
+1. Pattern promotions from Step 7 land in the dictionary and the resolver consults it on next invocation.
+2. Auto-mined renames (Jira project name change, Slack channel rename, doc title diff) appear in the dictionary within one cron cycle.
+3. Admin can view, edit, expire, or delete any dictionary entry with full evidence trail.
+4. Dictionary state is fully reproducible from the event log + clarifications table (no baked state).
 
 ---
 
@@ -195,29 +312,39 @@ These are not optional polish — they are how husn.io avoids becoming surveilla
 
 ## Verification (end-to-end)
 
-The full system is verifiable against a **seeded contradiction** scenario:
+The full system is verifiable against a **seeded contradiction + clarification + identity-scope** scenario:
 
-1. Create a project "Project Atlas" with linked Slack channel, Jira project, Drive folder.
+1. Create a project "Project Atlas" with linked Slack channel, Jira project, Drive folder. Three personas (Eng Manager, QA Lead, Security Lead) with distinct `viewer_id`s.
 2. Seed Round 0 — everything aligns on June 3.
-3. Round 1: change launch date to June 10 in Jira.
-4. **Expected:** Step 4 fires R-DATE-1 within 60s; Step 5 dispatches acks to QA + Security teams; Step 6 brief reflects the change with evidence; Step 7 risk signal rises.
-5. Round 2: update Drive doc to June 10. Expected: finding auto-closes; ack rate ticks up; risk signal falls.
-6. Manually confirm no individual is named in any surface during the entire scenario.
+3. **Round 1 (drift):** change launch date to June 10 in Jira.
+   **Expected:** Step 4 fires R-DATE-1 within 60s. Step 6 skeleton picks up the conflict; renderer produces a brief that shows both candidates side-by-side (NOT picking one). Verifier reports `nli_fail_count=0`. Cost per brief ≤ $0.05.
+4. **Round 2 (reconciliation):** update Drive doc to June 10.
+   **Expected:** conflict closes; next brief reflects single value; cascading rollback updates dependent rows.
+5. **Round 3 (deixis + clarification):** seed a Slack thread where someone says "let's go with that approach" between two competing proposals.
+   **Expected:** deixis resolver marks `ambiguous: true` with candidate list. Brief surfaces a "clarification needed" item. User clicks → Track A fact updates immediately; Track B does NOT auto-promote a pattern (only one confirmation).
+6. **Round 4 (silence):** merge a change in #ios that historically would have triggered a notification in #backend; do not send it.
+   **Expected:** absence detector emits `expected_loops_missed`; next backend-persona brief includes the missed-loop line item.
+7. **Round 5 (identity scope):** second `viewer_id` with different project membership requests a brief.
+   **Expected:** their brief contains no facts from projects they don't own; RLS test passes.
+8. **Anti-monitoring guardrail check:** manually confirm no individual is named in any surface during the entire scenario; LLM-as-judge on 20-run sample reports zero per-individual responsiveness language.
 
-If all six pass, husn.io's MVP is functioning end-to-end.
+If all eight pass, husn.io's MVP is functioning end-to-end.
 
 ---
 
 ## What is deliberately NOT in this plan
 
-- **Multi-tenancy** — local MVP only
-- **SSO / SAML / SCIM** — required before first customer, not now
+- **Multi-tenancy** — local MVP only (but `tenant_id` is on every table from day one so the cutover is mechanical)
+- **SSO / SAML / SCIM** — required before first customer, not now. Identity is mocked via a local `viewer_id` in the URL for MVP — same code path that SSO will populate later.
 - **CASA + M365 Certification** — required before first paying customer (3–6 month timeline; budget separately)
 - **SOC 2 Type II** — required before mid-market enterprise; ~6 months ramp on Drata/Vanta
 - **Marketplace approval (Slack, Atlassian)** — pursue once architecture stabilises
 - **CC'd shadow inbox** — killed per legal/DLP findings
 - **EU AI Act high-risk conformity work** — by deliberately staying out of individual scoring, we aim to avoid Annex III; revisit before EU GTM
 - **Forecasting beyond rule-based** — ML/learned risk models come after we have a corpus of resolved findings
+- **RAG for briefs** — explicitly out. RAG only powers the future `/chat` surface; briefs are precomputed against a structured view.
+- **Per-tenant LoRA fine-tuning (Tier 2)** — out until a paying enterprise customer requires it AND DPIA + BetrVG agreement template are signed
+- **Cross-tenant learning of any kind** — never. Per-tenant isolation is sacred; no shared dictionaries, no shared classifiers trained on customer data, no shared LoRA bases.
 
 ---
 

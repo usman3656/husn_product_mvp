@@ -152,6 +152,15 @@ function FindingRow({ finding }: { finding: Finding }) {
           >
             {finding.rule_id}
           </span>
+          {finding.rule_id.startsWith("AGENT-FINDING-") && (
+            <span
+              className="rounded px-1.5 py-0.5 text-[9px] font-mono uppercase tracking-wide"
+              style={{ background: "#6f7bff22", color: "#a5b4fc" }}
+              title="Produced by the LLM agent — see Briefs card for the reasoning"
+            >
+              AI
+            </span>
+          )}
           <span className="font-medium">{finding.summary}</span>
         </div>
         <span style={{ color: "var(--muted)" }}>{timeAgo(finding.opened_at)}</span>

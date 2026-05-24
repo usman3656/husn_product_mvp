@@ -303,7 +303,7 @@ class Finding(Base):
     __tablename__ = "findings"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    rule_id: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    rule_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     claim_group_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
     project_id: Mapped[int | None] = mapped_column(BigInteger, index=True)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="open")
@@ -338,4 +338,108 @@ class FindingEvidence(Base):
     role: Mapped[str] = mapped_column(String(16), nullable=False, default="primary")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class AgentRun(Base):
+    """One execution of the LLM agent. Per-run audit log: input/output token
+    counts, model, status, error if any. Lets us track cost over time and
+    debug failures.
+    """
+
+    __tablename__ = "agent_runs"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    project_id: Mapped[int | None] = mapped_column(BigInteger, index=True)
+    trigger: Mapped[str] = mapped_column(String(32), nullable=False)  # cron|manual|on_change
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="running")  # running|ok|failed
+    model: Mapped[str] = mapped_column(String(128), nullable=False)
+    provider: Mapped[str] = mapped_column(String(32), nullable=False)  # ollama|groq|anthropic|claude-cli
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    input_tokens: Mapped[int | None] = mapped_column()
+    output_tokens: Mapped[int | None] = mapped_column()
+    duration_ms: Mapped[int | None] = mapped_column()
+    finding_count: Mapped[int | None] = mapped_column()
+    brief_count: Mapped[int | None] = mapped_column()
+    error: Mapped[str | None] = mapped_column(Text)
+    raw_response: Mapped[str | None] = mapped_column(Text)  # truncated dump for debugging
+
+
+class ChatSession(Base):
+    """One conversation thread with the agent, anchored to a project.
+
+    Multiple sessions per project are allowed (think: one per topic).
+    The session's `title` is auto-set from the first user message and can be
+    edited later.
+    """
+
+    __tablename__ = "chat_sessions"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    project_id: Mapped[int | None] = mapped_column(BigInteger, index=True)
+    title: Mapped[str] = mapped_column(String(200), nullable=False, default="(untitled)")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class ChatMessage(Base):
+    """One turn in a chat session. role ∈ {user, assistant, system}."""
+
+    __tablename__ = "chat_messages"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    session_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    role: Mapped[str] = mapped_column(String(16), nullable=False)  # user|assistant|system
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    # Assistant-only: which claims/artifacts the model cited (validated)
+    cited_claim_ids: Mapped[list[int] | None] = mapped_column(JSONB)
+    cited_artifact_ids: Mapped[list[int] | None] = mapped_column(JSONB)
+    # Assistant-only: token + model accounting
+    model: Mapped[str | None] = mapped_column(String(128))
+    input_tokens: Mapped[int | None] = mapped_column()
+    output_tokens: Mapped[int | None] = mapped_column()
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class Brief(Base):
+    """A per-persona pre-meeting brief produced by the agent.
+
+    content is a structured JSON document:
+      {
+        "headline": "Atlas launch date drift unresolved",
+        "bullets": [
+          {"text": "Slack #atlas-program says June 10; Target GA doc says June 3",
+           "claim_ids": [7, 31]},
+          ...
+        ]
+      }
+    Every bullet's claim_ids are validated against the input dossier
+    BEFORE the brief is persisted.
+    """
+
+    __tablename__ = "briefs"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    project_id: Mapped[int | None] = mapped_column(BigInteger, index=True)
+    agent_run_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    persona: Mapped[str] = mapped_column(String(64), nullable=False)
+    content: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    source_claim_ids: Mapped[list[int]] = mapped_column(JSONB, nullable=False)
+    model: Mapped[str] = mapped_column(String(128), nullable=False)
+    generated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index("ix_brief_project_persona", "project_id", "persona"),
+        Index("ix_brief_generated_at", "generated_at"),
     )

@@ -1,6 +1,8 @@
 from arq import cron
 from arq.connections import RedisSettings
 
+from husn.agent.run import run_agent_for_all_projects
+from husn.claims.extract import extract_pending as claims_extract_pending
 from husn.connectors.google.backfill import backfill_connection as google_backfill_connection
 from husn.connectors.google.backfill import get_connections as google_get_connections
 from husn.connectors.jira.backfill import backfill_connection as jira_backfill_connection
@@ -10,7 +12,6 @@ from husn.connectors.slack.backfill import get_connections as slack_get_connecti
 from husn.core.config import get_settings
 from husn.core.logging import configure_logging, log
 from husn.db.session import SessionLocal
-from husn.claims.extract import extract_pending as claims_extract_pending
 from husn.drift.evaluate import evaluate_drift as drift_evaluate
 from husn.graph.normalize import normalize_pending as graph_normalize_pending
 
@@ -93,6 +94,17 @@ async def evaluate_drift(ctx: dict) -> dict:
         return await drift_evaluate(session)
 
 
+async def run_agent(ctx: dict) -> dict:
+    """Step 6 agent — runs LLM analysis over each project. Cron every 5 min.
+
+    NOT run_at_startup: a single run can take ~30s on Ollama with a real
+    dossier, and we don't want it blocking the worker's normal boot. The
+    first cron tick within ~5 min will pick it up.
+    """
+    async with SessionLocal() as session:
+        return await run_agent_for_all_projects(session, trigger="cron")
+
+
 # Cron schedules — drift-tolerant offsets so the jobs don't pile up.
 _BACKFILL_JIRA_SECONDS = {0}             # :00 — jira backfill
 _BACKFILL_GOOGLE_SECONDS = {15}          # :15 — google (Gmail + Drive)
@@ -100,6 +112,7 @@ _BACKFILL_SLACK_SECONDS = {30}           # :30 — slack backfill
 _NORMALIZE_SECONDS = {0, 15, 30, 45}     # every 15s
 _EXTRACT_SECONDS = {5, 20, 35, 50}       # 5s after normalize
 _DRIFT_SECONDS = {10, 40}                # 5s after extract, twice/min
+_AGENT_MINUTES = {0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55}  # every 5 min at :00
 
 
 class WorkerSettings:
@@ -112,6 +125,7 @@ class WorkerSettings:
         normalize_graph,
         extract_claims,
         evaluate_drift,
+        run_agent,
     ]
     cron_jobs = [
         cron(jira_backfill, second=_BACKFILL_JIRA_SECONDS, run_at_startup=True),
@@ -120,6 +134,8 @@ class WorkerSettings:
         cron(normalize_graph, second=_NORMALIZE_SECONDS, run_at_startup=True),
         cron(extract_claims, second=_EXTRACT_SECONDS, run_at_startup=True),
         cron(evaluate_drift, second=_DRIFT_SECONDS, run_at_startup=True),
+        # Agent on a 5-min cadence; second=0 so the cost is borne at the top of each window.
+        cron(run_agent, minute=_AGENT_MINUTES, second={0}),
     ]
     on_startup = startup
     on_shutdown = shutdown

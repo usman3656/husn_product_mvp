@@ -30,6 +30,20 @@ class Settings(BaseSettings):
     google_client_secret: str = ""
     google_redirect_uri: str = "http://localhost:8000/auth/google/callback"
 
+    # LLM backend for the Step 6 agent. Provider determines which client is used;
+    # each provider gets its own base_url + model fields below.
+    llm_provider: str = "ollama"  # ollama | groq | anthropic | claude_cli
+    llm_request_timeout_s: int = 180
+
+    ollama_base_url: str = "http://host.docker.internal:11434"
+    ollama_model: str = "qwen2.5:14b"
+
+    groq_api_key: str = ""
+    groq_model: str = "llama-3.3-70b-versatile"
+
+    anthropic_api_key: str = ""
+    anthropic_model: str = "claude-sonnet-4-6"
+
 
 @lru_cache
 def get_settings() -> Settings:
