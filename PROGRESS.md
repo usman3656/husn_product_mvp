@@ -8,10 +8,10 @@
 
 | Field | Value |
 |---|---|
-| Last commit on `main` | `50e5910` — audit-watcher daemon (preceded by `e5d2d39` Google end-to-end) |
-| Current step in flight | **Step 6 — AI TPM agent (brought forward, expanded)** |
-| Phase within Step 6 | Substrate complete (Jira + Slack + Google all live). LLM not yet wired. |
-| **Blocked on user** | Anthropic API key — paste `sk-ant-api03-...` here and I'll save it to `.env` |
+| Last commit on `main` | `b96c1a9` — Step 6 v1 checkpoint + Step 6 v2 architecture docs + chat with RAG |
+| Current step in flight | **Step 6 v2 — AI TPM agent (skeleton + LLM-as-typewriter + NLI verifier)** |
+| Phase within Step 6 v2 | v1 (single-call LLM-direct-from-dossier) shipped as checkpoint; v2 rewrite is next coding step |
+| **LLM backend live** | Groq (`llama-3.3-70b-versatile`, free tier, 6K TPM). API key in `.env`. Ollama qwen2.5:7b also available locally as fallback. |
 | Services up? | `docker compose ps` — should show 5 containers (postgres, redis, api, worker, web) |
 | Audit watcher? | `.claude/bin/audit-watcher.sh status` — should be `running` |
 
@@ -26,7 +26,8 @@
 | **3 — Claims (deterministic)** | 🟡 partial — Slack + Jira only | 7 extractors with evidence anchors fire on Slack messages + Jira issues. Google email / doc / sheet content is normalized but **no extractors run on it yet** (would need ~3 new extractor classes; trivial work but not yet shipped). |
 | **4 — Drift (deterministic)** | 🟡 partial — kept | R-DATE-1 shipped + Drift inbox UI. Remaining rules (R-DATE-2, R-DECISION-1, R-OWNER-1) + auto-close **skipped per 2026-05-24 pivot**. R-DATE-1 stays as always-on fallback. |
 | **5 — Propagation** | ⛔ subsumed | Folded into Step 6. Agent will decide who needs to know. |
-| **6 — AI TPM agent (brief skeleton + LLM-as-typewriter)** | 🚧 starting | Rewritten 2026-05-24 v2: deterministic skeleton builder → Anthropic renderer → NLI verifier → persist. RAG NOT in brief path (chat-only). See `## What's next`. |
+| **6 — AI TPM agent (brief skeleton + LLM-as-typewriter)** | 🟡 v1 shipped, v2 pending | **v1 (single-call LLM-direct-from-dossier) is live.** Produces 2 findings + 4 briefs in ~2s on Groq Llama 3.3 70B; citation validator catches hallucinated claim_ids. **v2 rewrite is next:** deterministic skeleton builder → Anthropic renderer → NLI verifier → deterministic-template fallback. See `## What's next`. |
+| **6.chat — Interactive Q&A (RAG, aligned with v2)** | ✅ shipped | `/chat` page with session sidebar; client-side fetch; assistant turns cite `[claim N]` / `[artifact N]` chips; per-question RAG retrieval via Postgres ILIKE keyword search across artifacts.title+body, deduped against a recency floor. Working end-to-end against Project Atlas. |
 | **7 — Feedback loop (clarifications + two-track writes)** | 📋 planned | Repurposed slot. Track A fact-writes immediate; Track B pattern promotions gated on quorum + COI + Dawid-Skene reliability. |
 | **8 — Tiered learning (Tier 0 dict only in MVP)** | 📋 planned | Tier 0 alias dictionary. Tier 1 (few-shot) deferred; Tier 2 (LoRA) opt-in / DPIA-only, out of MVP. |
 | **Connections management** | ✅ shipped | `/connections` page lists every source connection with token health, scope count, artifact count, last-sync time. Disconnect wipes the token + allowlist but keeps historical data. |
@@ -93,9 +94,9 @@ Open tasks (re-scoped to new architecture):
 
 ### Pending user actions
 
-1. **Paste Anthropic API key** — `sk-ant-api03-...`. I'll save to `.env` (gitignored). Rotate after we're done since chat logs are a risk.
+1. **Paste Anthropic API key** if we want Sonnet for the v2 renderer (recommended — better at strict skeleton-only-citation discipline than open models). Groq Llama 3.3 70B keeps working as fallback / for chat. Rotate the Groq key in chat after rotation cadence.
 2. (Already chosen) Triggering pattern: **scheduled cron every 5 min per (project, persona) + on-demand "Re-run analysis" button + webhook-driven on significant events**.
-3. (Already chosen) Brief output v0: **per-persona briefs with conflicts rendered side-by-side**. Agent findings written into existing `findings` table with `AGENT-FINDING-*` prefix.
+3. (Already chosen) Brief output: **per-persona briefs with conflicts rendered side-by-side**. Agent findings written into existing `findings` table with `AGENT-FINDING-*` prefix.
 
 ### Next coding session order
 
@@ -178,6 +179,7 @@ Keep this file under ~300 lines. Truncate `Recent activity` to last 30 entries.
 
 ## Recent activity (newest first)
 
+- **2026-05-24** — Commit `b96c1a9`: Step 6 v1 checkpoint + v2 architecture docs + chat with RAG. v1 brief path is live but explicitly NOT v2-aligned; next coding step is to rewrite to skeleton + typewriter + NLI verifier. Chat surface IS v2-aligned (RAG only on `/chat`). Verified live: 2 findings + 4 briefs from Project Atlas data in 1.96s, 0 hallucinated citations. Chat answers correctly cite Google Doc "Weekly Status Notes — Atlas" after RAG retrieval pull-in.
 - **2026-05-24** — Docs-only pivot v2: architecture deepening (brief skeleton + LLM-as-typewriter + two-track feedback + Tier-0-only learning). 7-agent parallel critic pass ratified. `knowledge.md` §11 added with the architecture decisions and §8 holes 12–14 added with the risks the critics surfaced. `plan.md` Step 6 fully rewritten; Steps 7 and 8 repurposed from `subsumed` slots to cover feedback-loop and tiered-learning. No code changes — Step 6 build will start from the new design.
 - **2026-05-24** — Commit `50e5910`: audit-watcher daemon. Host-side Python poller (no deps), 4s interval, calls existing `.claude/audit.sh` on changed files. Started in background (`pid` in `/tmp/husn-audit-watcher.pid`). Storms capped at 5 audits/tick.
 - **2026-05-24** — Commit `e5d2d39`: Google connector end-to-end. OAuth 2.0 + offline access, Gmail + Drive + Docs + Sheets pulled, allowlist UI with Drive folder TREE picker (lazy-loaded subfolder expand, multi-select at any depth), `/connections` management page with disconnect, delta sync via Gmail historyId + Drive startPageToken cursors stored on `connections.extra`. Bootstrapped against the user's `husunn.ai@gmail.com` workspace: 12 docs ("Project Atlas — Launch Plan", "QA Regression Plan", etc.), 8 sheets ("Risk Register", "Cutover Task Tracker"), 6 emails ("Cutover window approval — Atlas → June 10 GA"). Two bug fixes inline: mention dedup + ON CONFLICT, per-row rollback in normalize.
