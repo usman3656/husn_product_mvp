@@ -1,3 +1,4 @@
+import { CardHeader, OfflineState, Pill, Tile } from "@/components/ui";
 import { FETCH_INIT } from "@/lib/fetch-init";
 const SERVER_API_URL = process.env.API_URL ?? "http://api:8000";
 
@@ -62,92 +63,77 @@ export async function GraphCard() {
   const [summary, projects] = await Promise.all([fetchSummary(), fetchProjects()]);
   if (!summary) {
     return (
-      <div
-        className="rounded-lg border p-5 text-sm"
-        style={{ borderColor: "var(--border)", background: "var(--panel)", color: "var(--muted)" }}
-      >
-        Graph offline.
-      </div>
+      <Tile>
+        <CardHeader title="What we pulled from your tools" />
+        <div className="mt-4">
+          <OfflineState title="We could not reach your data right now" />
+        </div>
+      </Tile>
     );
   }
   const c = summary.counts;
   const pending = c.raw_pending_normalization;
 
   return (
-    <div
-      className="rounded-lg border p-5"
-      style={{ borderColor: "var(--border)", background: "var(--panel)" }}
-    >
-      <div className="flex items-baseline justify-between">
-        <div>
-          <h2 className="text-sm font-semibold">Operational graph</h2>
-          <p className="mt-0.5 text-[11px]" style={{ color: "var(--muted)" }}>
-            Step 2 · auto-sync · last ingest {timeAgo(summary.last_raw_fetched_at)} · last
-            normalize {timeAgo(summary.last_normalized_at)}
-          </p>
-        </div>
-        <span
-          className="rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-wide"
-          style={{
-            borderColor: pending === 0 ? "#22c55e55" : "#eab30855",
-            color: pending === 0 ? "#86efac" : "#fde68a",
-            background: pending === 0 ? "#22c55e11" : "#eab30811",
-          }}
-        >
-          {pending === 0 ? "in sync" : `${pending} pending`}
-        </span>
-      </div>
+    <Tile lift>
+      <CardHeader
+        title="What we pulled from your tools"
+        subtitle={`Synced automatically · last update ${timeAgo(summary.last_raw_fetched_at)}`}
+        right={
+          pending === 0 ? (
+            <Pill tone="success">In sync</Pill>
+          ) : (
+            <Pill tone="warning">{pending} catching up</Pill>
+          )
+        }
+      />
 
-      <div className="mt-4 grid grid-cols-3 gap-3 sm:grid-cols-6">
-        <Stat label="persons" value={c.persons} />
-        <Stat label="identities" value={c.person_identities} />
-        <Stat label="projects" value={c.projects} />
-        <Stat label="scopes" value={c.project_sources} />
-        <Stat label="artifacts" value={c.artifacts} />
-        <Stat label="mentions" value={c.artifact_mentions} />
+      <div className="mt-4 grid grid-cols-3 gap-2.5">
+        <MiniStat label="People" value={c.persons} />
+        <MiniStat label="Projects" value={c.projects} />
+        <MiniStat label="Items" value={c.artifacts} />
+        <MiniStat label="Identities" value={c.person_identities} />
+        <MiniStat label="Scopes" value={c.project_sources} />
+        <MiniStat label="Mentions" value={c.artifact_mentions} />
       </div>
 
       {projects.projects.length > 0 && (
         <div className="mt-5 border-t pt-4" style={{ borderColor: "var(--border)" }}>
-          <p className="text-[11px] uppercase tracking-wide" style={{ color: "var(--muted)" }}>
+          <p className="text-[12px] font-medium" style={{ color: "var(--muted)" }}>
             Projects
           </p>
           <ul className="mt-2 space-y-1.5">
             {projects.projects.map((p) => (
               <li
                 key={p.id}
-                className="flex items-center justify-between rounded border px-3 py-1.5 text-xs"
-                style={{ borderColor: "var(--border)" }}
+                className="flex items-center justify-between rounded-[var(--radius-sm)] border px-3 py-2 text-[13px]"
+                style={{ borderColor: "var(--border)", background: "var(--panel-2)" }}
               >
-                <span className="flex items-center gap-2">
-                  <span className="font-mono" style={{ color: "var(--muted)" }}>
-                    {p.slug}
-                  </span>
-                  <span>{p.name}</span>
-                </span>
-                <span className="flex items-center gap-3 text-[11px]" style={{ color: "var(--muted)" }}>
-                  <span>{p.artifact_count} artifacts</span>
-                  <span>{p.scopes.length} scopes</span>
+                <span className="truncate font-medium">{p.name}</span>
+                <span className="shrink-0 text-[12px]" style={{ color: "var(--muted)" }}>
+                  {p.artifact_count} items
                 </span>
               </li>
             ))}
           </ul>
         </div>
       )}
-    </div>
+    </Tile>
   );
 }
 
-function Stat({ label, value }: { label: string; value: number }) {
+function MiniStat({ label, value }: { label: string; value: number }) {
   return (
     <div
-      className="rounded border px-3 py-2"
-      style={{ borderColor: "var(--border)", background: "#0f1218" }}
+      className="rounded-[var(--radius-sm)] border px-3 py-2.5"
+      style={{ borderColor: "var(--border)", background: "var(--panel-2)" }}
     >
-      <p className="text-[10px] uppercase tracking-wide" style={{ color: "var(--muted)" }}>
+      <p className="text-[11px] font-medium" style={{ color: "var(--muted)" }}>
         {label}
       </p>
-      <p className="mt-0.5 font-mono text-base">{value}</p>
+      <p className="mt-0.5 text-[20px] font-semibold" style={{ letterSpacing: "-0.02em" }}>
+        {value}
+      </p>
     </div>
   );
 }

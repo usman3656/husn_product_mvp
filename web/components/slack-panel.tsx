@@ -1,3 +1,4 @@
+import { CardHeader, EmptyState, Pill, Tile } from "@/components/ui";
 import { FETCH_INIT } from "@/lib/fetch-init";
 import { DisconnectButton } from "@/components/disconnect-button";
 
@@ -64,76 +65,56 @@ export async function SlackPanel() {
     .join(", ");
 
   return (
-    <div
-      className="rounded-lg border p-5"
-      style={{ borderColor: "var(--border)", background: "var(--panel)" }}
-    >
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-sm font-semibold">Slack</h2>
-          {isConnected && (
-            <p className="mt-0.5 text-[11px]" style={{ color: "var(--muted)" }}>
-              {workspaceLabel} · {feed.channels.length} channels · {feed.total_messages} messages
-            </p>
-          )}
-        </div>
-        <div className="flex items-center">
-          <span
-            className="rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-wide"
-            style={{
-              borderColor: isConnected ? "#22c55e55" : "var(--border)",
-              color: isConnected ? "#86efac" : "var(--muted)",
-              background: isConnected ? "#22c55e11" : "transparent",
-            }}
-          >
-            {isConnected ? "connected" : "not connected"}
-          </span>
-          {isConnected && status.connections[0] && (
-            <DisconnectButton
-              connectionId={status.connections[0].id}
-              label={status.connections[0].team_name || status.connections[0].account_label || "Slack"}
-            />
-          )}
-        </div>
-      </div>
+    <Tile lift>
+      <CardHeader
+        title="Slack"
+        subtitle={
+          isConnected
+            ? `${workspaceLabel} · ${feed.channels.length} channels · ${feed.total_messages} messages`
+            : "Channels and threads"
+        }
+        right={
+          <div className="flex items-center">
+            <Pill tone={isConnected ? "success" : "neutral"}>
+              {isConnected ? "Connected" : "Not connected"}
+            </Pill>
+            {isConnected && status.connections[0] && (
+              <DisconnectButton
+                connectionId={status.connections[0].id}
+                label={status.connections[0].team_name || status.connections[0].account_label || "Slack"}
+              />
+            )}
+          </div>
+        }
+      />
 
       {!isConnected ? (
-        <NotConnected />
+        <div className="mt-4">
+          <EmptyState
+            title="Connect Slack to start"
+            hint="Authorize a workspace and invite the app to the channels you want watched."
+          >
+            <a
+              href={`${BROWSER_API_URL}/auth/slack/start`}
+              className="inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[13px] font-medium"
+              style={{ background: "var(--accent)", color: "var(--on-accent)" }}
+            >
+              Connect Slack
+              <span aria-hidden>→</span>
+            </a>
+          </EmptyState>
+        </div>
       ) : feed.channels.length === 0 ? (
-        <NoChannels />
+        <div className="mt-4">
+          <EmptyState
+            title="No channels yet"
+            hint="Invite the app to a channel in Slack, then run a backfill to pull messages."
+          />
+        </div>
       ) : (
         <ChannelList channels={feed.channels} />
       )}
-    </div>
-  );
-}
-
-function NotConnected() {
-  return (
-    <div
-      className="mt-4 flex items-center justify-between rounded border border-dashed p-4"
-      style={{ borderColor: "var(--border)" }}
-    >
-      <p className="text-xs" style={{ color: "var(--muted)" }}>
-        Authorize a Slack workspace to start ingesting.
-      </p>
-      <a
-        href={`${BROWSER_API_URL}/auth/slack/start`}
-        className="rounded border px-3 py-1.5 text-xs font-medium"
-        style={{ borderColor: "var(--border)", color: "var(--text)", background: "#1a1f2c" }}
-      >
-        Connect Slack →
-      </a>
-    </div>
-  );
-}
-
-function NoChannels() {
-  return (
-    <div className="mt-4 rounded border border-dashed p-4 text-xs" style={{ borderColor: "var(--border)", color: "var(--muted)" }}>
-      No channels yet. Run a backfill:{" "}
-      <code className="font-mono">curl -X POST {BROWSER_API_URL}/slack/backfill</code>
-    </div>
+    </Tile>
   );
 }
 
@@ -143,12 +124,11 @@ function ChannelList({ channels }: { channels: SlackChannel[] }) {
     <div className="mt-4 space-y-2">
       {!hasAnyMember && (
         <div
-          className="rounded border p-3 text-[11px]"
-          style={{ borderColor: "#eab30855", background: "#eab30811", color: "#fde68a" }}
+          className="rounded-[var(--radius-sm)] border p-3 text-[12px] leading-relaxed"
+          style={{ borderColor: "var(--warning-line)", background: "var(--warning-soft)", color: "var(--warning-ink)" }}
         >
-          ⚠ The bot isn&apos;t in any of these channels yet. In Slack, type{" "}
-          <code className="font-mono">/invite @husn.io local dev</code> in a channel, then{" "}
-          <code className="font-mono">POST {BROWSER_API_URL}/slack/backfill</code> to pull messages.
+          The app is not in any of these channels yet. In Slack, invite it to a channel,
+          then run a backfill to pull messages.
         </div>
       )}
       {channels.map((c) => (
@@ -162,57 +142,46 @@ function ChannelRow({ channel }: { channel: SlackChannel }) {
   const member = channel.is_member;
   return (
     <details
-      className="rounded border"
-      style={{ borderColor: "var(--border)", background: "#0f1218" }}
+      className="group rounded-[var(--radius-sm)] border"
+      style={{ borderColor: "var(--border)", background: "var(--panel-2)" }}
     >
       <summary
-        className="flex cursor-pointer list-none items-center justify-between px-3 py-2 text-xs"
+        className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2 text-[13px]"
         style={{ color: "var(--text)" }}
       >
-        <span className="flex items-center gap-2">
-          <span style={{ color: "var(--muted)" }}>▸</span>
-          <span className="font-mono">#{channel.name}</span>
+        <span className="flex min-w-0 items-center gap-2">
+          <span
+            aria-hidden
+            className="text-[11px] transition-transform duration-200 group-open:rotate-90"
+            style={{ color: "var(--muted)" }}
+          >
+            ▸
+          </span>
+          <span className="truncate font-mono text-[12px]">#{channel.name}</span>
           {member ? (
-            <span
-              className="rounded px-1.5 py-0.5 text-[9px] uppercase tracking-wide"
-              style={{ background: "#22c55e22", color: "#86efac" }}
-            >
-              bot joined
-            </span>
+            <Pill tone="success">In channel</Pill>
           ) : (
-            <span
-              className="rounded px-1.5 py-0.5 text-[9px] uppercase tracking-wide"
-              style={{ background: "#11141b", color: "var(--muted)" }}
-            >
-              bot not in channel
-            </span>
+            <Pill tone="neutral">Not in channel</Pill>
           )}
-          {channel.is_archived && (
-            <span
-              className="rounded px-1.5 py-0.5 text-[9px] uppercase tracking-wide"
-              style={{ background: "#11141b", color: "var(--muted)" }}
-            >
-              archived
-            </span>
-          )}
+          {channel.is_archived && <Pill tone="neutral">Archived</Pill>}
         </span>
-        <span className="flex items-center gap-3" style={{ color: "var(--muted)" }}>
+        <span className="flex shrink-0 items-center gap-2 text-[11px]" style={{ color: "var(--muted)" }}>
           <span>{channel.num_members ?? "?"} members</span>
           <span>{channel.message_count} msgs</span>
         </span>
       </summary>
       <div className="border-t px-3 py-2" style={{ borderColor: "var(--border)" }}>
         {channel.messages.length === 0 ? (
-          <p className="py-2 text-[11px]" style={{ color: "var(--muted)" }}>
+          <p className="py-2 text-[12px]" style={{ color: "var(--muted)" }}>
             {member
-              ? "No messages ingested yet for this channel. Send one in Slack and re-run backfill."
-              : "Bot can't read this channel until invited. /invite the app in Slack."}
+              ? "No messages here yet. Send one in Slack and re-run a backfill."
+              : "The app cannot read this channel until it is invited."}
           </p>
         ) : (
           <ul className="space-y-1.5">
             {channel.messages.map((m) => (
-              <li key={m.ts ?? Math.random()} className="text-[11px] leading-relaxed">
-                <span className="font-mono" style={{ color: "var(--muted)" }}>
+              <li key={m.ts ?? Math.random()} className="text-[12px] leading-relaxed">
+                <span className="font-mono text-[11px]" style={{ color: "var(--muted)" }}>
                   {formatTs(m.ts)}
                 </span>{" "}
                 <span style={{ color: "var(--accent)" }}>{m.author_name}</span>

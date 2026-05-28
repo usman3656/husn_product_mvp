@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { DEMO_MODE } from "@/lib/demo";
+import { EvidenceChip, LoadingState, OfflineState, Pill } from "@/components/ui";
 
 const BROWSER_API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -34,13 +35,13 @@ const SUGGESTIONS = [
   "What's the biggest risk to the launch right now?",
 ];
 
-// Baked transcript for the read-only GitHub Pages snapshot — real Q&A captured
+// Baked transcript for the read-only GitHub Pages snapshot: real Q&A captured
 // against the live Project Atlas graph. No backend in the static build.
 const DEMO_SESSIONS: SessionSummary[] = [
   {
     id: 1,
     project_id: 1,
-    title: "Project Atlas — launch readiness",
+    title: "Project Atlas launch readiness",
     created_at: "2026-05-20T14:02:00Z",
     updated_at: "2026-05-20T14:09:00Z",
   },
@@ -62,7 +63,7 @@ const DEMO_MESSAGES: Message[] = [
     id: 2,
     role: "assistant",
     content:
-      "The launch date is in conflict across sources. Jira epic ATLAS-204 lists the target as June 10 [claim 43], but the latest steerco deck in Drive (\"Atlas Launch Plan v3\") still says June 3 [claim 51], and a Slack thread in #atlas-launch on May 18 has the eng lead saying \"we're holding June 10, the deck is stale\" [artifact 109]. So the operative date is June 10 — the deck is the outdated source and hasn't been updated. I've flagged this as an unresolved drift [finding 12] because no one has corrected the deck and Finance is still planning against June 3.",
+      "The launch date is in conflict across sources. Jira epic ATLAS-204 lists the target as June 10 [claim 43], but the latest steerco deck in Drive (\"Atlas Launch Plan v3\") still says June 3 [claim 51], and a Slack thread in #atlas-launch on May 18 has the eng lead saying \"we're holding June 10, the deck is stale\" [artifact 109]. So the operative date is June 10. The deck is the outdated source and hasn't been updated. I've flagged this as an open conflict [finding 12] because no one has corrected the deck and Finance is still planning against June 3.",
     cited_claim_ids: [43, 51],
     cited_artifact_ids: [109],
     model: "llama-3.3-70b-versatile",
@@ -185,7 +186,7 @@ export function ChatRoom() {
     const text = content.trim();
     if (!text || currentId == null) return;
 
-    // No backend in the static demo — echo the question and a canned note.
+    // No backend in the static demo: echo the question and a canned note.
     if (DEMO_MODE) {
       const now = new Date().toISOString();
       setMessages((prev) => [
@@ -205,7 +206,7 @@ export function ChatRoom() {
           id: -Date.now() - 1,
           role: "assistant",
           content:
-            "This is a static snapshot of husn.io for demo purposes — the live agent isn't running here. In the full product this answer is generated against the operational graph with grounded citations to claims, artifacts, and findings, exactly like the transcript above.",
+            "This is a static snapshot of husn.ai for the demo, so the live agent isn't running here. In the full product, this answer is generated from your tools with citations back to the messages, tickets, and docs it came from, exactly like the transcript above.",
           cited_claim_ids: [],
           cited_artifact_ids: [],
           model: "demo",
@@ -262,68 +263,72 @@ export function ChatRoom() {
     }
   }
 
-  function timeAgo(iso: string): string {
-    const t = new Date(iso).getTime();
-    const s = Math.max(0, Math.floor((Date.now() - t) / 1000));
-    if (s < 60) return `${s}s`;
-    if (s < 3600) return `${Math.floor(s / 60)}m`;
-    if (s < 86400) return `${Math.floor(s / 3600)}h`;
-    return `${Math.floor(s / 86400)}d`;
-  }
-
   if (loading) {
-    return (
-      <p className="text-sm" style={{ color: "var(--muted)" }}>
-        Loading…
-      </p>
-    );
+    return <LoadingState label="Loading your conversations" />;
   }
 
   return (
     <div className="grid grid-cols-1 gap-4 md:grid-cols-[260px_1fr]">
       {/* Session sidebar */}
       <aside
-        className="rounded-lg border p-3"
-        style={{ borderColor: "var(--border)", background: "var(--panel)" }}
+        className="rounded-[var(--radius)] border p-3"
+        style={{ borderColor: "var(--border)", background: "var(--panel)", boxShadow: "var(--shadow-sm)" }}
       >
-        <button
-          onClick={() => createSession(true)}
-          className="w-full rounded border px-3 py-1.5 text-xs font-medium"
-          style={{ borderColor: "var(--border)", color: "var(--text)", background: "#1a1f2c" }}
-        >
-          + New conversation
-        </button>
-        <ul className="mt-3 space-y-1">
-          {sessions.map((s) => (
-            <li
-              key={s.id}
-              className={`group flex items-center justify-between rounded px-2 py-1.5 text-xs ${s.id === currentId ? "" : "cursor-pointer"}`}
-              style={{
-                background: s.id === currentId ? "#1a1f2c" : "transparent",
-                color: s.id === currentId ? "var(--text)" : "var(--muted)",
-              }}
-            >
-              <button
-                onClick={() => setCurrentId(s.id)}
-                className="flex-1 truncate text-left"
-                title={s.title}
-              >
-                {s.title}
-              </button>
-              <span className="ml-2 text-[10px] opacity-0 group-hover:opacity-100">
-                <button onClick={() => deleteSession(s.id)} title="Delete">
-                  ✕
-                </button>
-              </span>
-            </li>
-          ))}
-        </ul>
+        {!DEMO_MODE && (
+          <button
+            onClick={() => createSession(true)}
+            className="w-full rounded-full border px-3 py-1.5 text-[13px] font-medium transition-colors duration-150"
+            style={{ borderColor: "var(--border-strong)", color: "var(--text)", background: "var(--panel)" }}
+          >
+            New conversation
+          </button>
+        )}
+        {sessions.length === 0 ? (
+          <p className="mt-3 text-[12px]" style={{ color: "var(--muted)" }}>
+            No conversations yet.
+          </p>
+        ) : (
+          <ul className={`${DEMO_MODE ? "" : "mt-3"} space-y-1`}>
+            {sessions.map((s) => {
+              const active = s.id === currentId;
+              return (
+                <li
+                  key={s.id}
+                  className="group flex items-center justify-between rounded-[var(--radius-sm)] px-2.5 py-2 text-[13px]"
+                  style={{
+                    background: active ? "var(--accent-soft)" : "transparent",
+                    color: active ? "var(--text)" : "var(--muted)",
+                  }}
+                >
+                  <button
+                    onClick={() => setCurrentId(s.id)}
+                    className="flex-1 truncate text-left"
+                    title={s.title}
+                  >
+                    {s.title}
+                  </button>
+                  {!DEMO_MODE && (
+                    <button
+                      onClick={() => deleteSession(s.id)}
+                      title="Delete conversation"
+                      aria-label="Delete conversation"
+                      className="ml-2 text-[12px] opacity-0 group-hover:opacity-100"
+                      style={{ color: "var(--muted)" }}
+                    >
+                      ✕
+                    </button>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
       </aside>
 
       {/* Conversation pane */}
       <section
-        className="flex h-[70vh] flex-col rounded-lg border"
-        style={{ borderColor: "var(--border)", background: "var(--panel)" }}
+        className="flex h-[70vh] flex-col rounded-[var(--radius)] border"
+        style={{ borderColor: "var(--border)", background: "var(--panel)", boxShadow: "var(--shadow-sm)" }}
       >
         <div
           ref={scrollerRef}
@@ -331,15 +336,15 @@ export function ChatRoom() {
           style={{ scrollBehavior: "smooth" }}
         >
           {messages.length === 0 ? (
-            <EmptyState onPick={send} disabled={sending} />
+            <EmptyChat onPick={send} disabled={sending} />
           ) : (
             <ul className="space-y-3">
               {messages.map((m) => (
                 <MessageRow key={m.id} message={m} />
               ))}
               {sending && (
-                <li className="text-[11px]" style={{ color: "var(--muted)" }}>
-                  thinking…
+                <li className="text-[12px]" style={{ color: "var(--muted)" }}>
+                  Thinking…
                 </li>
               )}
             </ul>
@@ -347,11 +352,8 @@ export function ChatRoom() {
         </div>
 
         {error && (
-          <div
-            className="border-t px-4 py-2 text-[11px]"
-            style={{ borderColor: "var(--border)", color: "#fca5a5" }}
-          >
-            ✗ {error}
+          <div className="border-t px-4 py-3" style={{ borderColor: "var(--border)" }}>
+            <OfflineState title="That message could not send" hint={error} />
           </div>
         )}
 
@@ -372,8 +374,8 @@ export function ChatRoom() {
                 send(input);
               }
             }}
-            placeholder="Ask anything about your project — Enter to send, Shift+Enter for newline"
-            className="flex-1 resize-none rounded border bg-transparent px-3 py-2 text-xs"
+            placeholder="Ask anything about your program (Enter to send, Shift+Enter for a new line)"
+            className="flex-1 resize-none rounded-[var(--radius-sm)] border bg-transparent px-3 py-2 text-[13px]"
             style={{ borderColor: "var(--border)", color: "var(--text)", minHeight: "44px", maxHeight: "160px" }}
             rows={1}
             disabled={sending || currentId == null}
@@ -381,8 +383,8 @@ export function ChatRoom() {
           <button
             type="submit"
             disabled={sending || !input.trim() || currentId == null}
-            className="rounded border px-4 py-2 text-xs font-medium disabled:opacity-50"
-            style={{ borderColor: "var(--border)", color: "var(--text)", background: "#1a1f2c" }}
+            className="rounded-full border px-4 py-2 text-[13px] font-medium transition-colors duration-150 disabled:opacity-50"
+            style={{ borderColor: "var(--accent)", color: "var(--on-accent)", background: "var(--accent)" }}
           >
             Send
           </button>
@@ -394,54 +396,36 @@ export function ChatRoom() {
 
 function MessageRow({ message }: { message: Message }) {
   const isUser = message.role === "user";
+  // Hide model/token telemetry in the demo snapshot (and it never shows for users).
+  const showTelemetry = !DEMO_MODE && !isUser && message.model;
   return (
     <li
-      className="rounded-lg border p-3"
+      className="rounded-[var(--radius-sm)] border p-3.5"
       style={{
-        borderColor: isUser ? "#1f2330" : "#6f7bff44",
-        background: isUser ? "#0f1218" : "#10131f",
+        borderColor: isUser ? "var(--border)" : "var(--accent-line)",
+        background: isUser ? "var(--panel-2)" : "var(--accent-soft)",
       }}
     >
       <div className="flex items-baseline justify-between gap-2">
-        <span
-          className="rounded px-1.5 py-0.5 text-[9px] font-mono uppercase tracking-wide"
-          style={{
-            background: isUser ? "#1a1f2c" : "#6f7bff22",
-            color: isUser ? "var(--muted)" : "#a5b4fc",
-          }}
-        >
-          {isUser ? "you" : "agent"}
-        </span>
-        {!isUser && message.model && (
-          <span className="text-[10px] font-mono" style={{ color: "var(--muted)" }}>
+        <Pill tone={isUser ? "neutral" : "accent"}>{isUser ? "You" : "Husn"}</Pill>
+        {showTelemetry && (
+          <span className="font-mono text-[10px]" style={{ color: "var(--muted)" }}>
             {message.model} · {message.input_tokens}→{message.output_tokens} tok
           </span>
         )}
       </div>
-      <div className="mt-2 whitespace-pre-wrap text-[12px] leading-relaxed">
+      <div className="mt-2 whitespace-pre-wrap text-[13px] leading-relaxed">
         <CitedText text={message.content} />
       </div>
       {!isUser &&
         (message.cited_claim_ids.length > 0 ||
           message.cited_artifact_ids.length > 0) && (
-          <div className="mt-2 flex flex-wrap gap-1.5">
+          <div className="mt-2.5 flex flex-wrap gap-1.5">
             {message.cited_claim_ids.map((id) => (
-              <span
-                key={`c${id}`}
-                className="rounded border px-1.5 py-0.5 font-mono text-[9px]"
-                style={{ borderColor: "#6f7bff44", color: "#a5b4fc", background: "#6f7bff11" }}
-              >
-                claim {id}
-              </span>
+              <EvidenceChip key={`c${id}`} source="Fact" cite={`#${id}`} tone="accent" />
             ))}
             {message.cited_artifact_ids.map((id) => (
-              <span
-                key={`a${id}`}
-                className="rounded border px-1.5 py-0.5 font-mono text-[9px]"
-                style={{ borderColor: "#22c55e55", color: "#86efac", background: "#22c55e11" }}
-              >
-                artifact {id}
-              </span>
+              <EvidenceChip key={`a${id}`} source="Source" cite={`#${id}`} tone="success" />
             ))}
           </div>
         )}
@@ -470,22 +454,22 @@ function CitedText({ text }: { text: string }) {
         ) : (
           <span
             key={i}
-            className="rounded px-1 font-mono text-[10px]"
+            className="rounded px-1 font-mono text-[11px]"
             style={{
               background:
                 p.kind === "claim"
-                  ? "#6f7bff22"
+                  ? "var(--accent-soft)"
                   : p.kind === "artifact"
-                    ? "#22c55e22"
-                    : "#eab30822",
+                    ? "var(--success-soft)"
+                    : "var(--warning-soft)",
               color:
                 p.kind === "claim"
-                  ? "#a5b4fc"
+                  ? "var(--accent-ink)"
                   : p.kind === "artifact"
-                    ? "#86efac"
-                    : "#fde68a",
+                    ? "var(--success-ink)"
+                    : "var(--warning-ink)",
             }}
-            title={`${p.kind} #${p.id}`}
+            title={`Cited ${p.kind} #${p.id}`}
           >
             {p.raw}
           </span>
@@ -495,7 +479,7 @@ function CitedText({ text }: { text: string }) {
   );
 }
 
-function EmptyState({
+function EmptyChat({
   onPick,
   disabled,
 }: {
@@ -503,18 +487,21 @@ function EmptyState({
   disabled: boolean;
 }) {
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-3">
-      <p className="text-sm" style={{ color: "var(--muted)" }}>
-        Start a conversation. Try one of these:
-      </p>
-      <ul className="w-full max-w-md space-y-1.5">
+    <div className="flex h-full flex-col items-center justify-center gap-4">
+      <div className="text-center">
+        <p className="text-[15px] font-medium">Ask about your program</p>
+        <p className="mt-1 text-[13px]" style={{ color: "var(--muted)" }}>
+          Try one of these to get started.
+        </p>
+      </div>
+      <ul className="w-full max-w-md space-y-2">
         {SUGGESTIONS.map((s) => (
           <li key={s}>
             <button
               disabled={disabled}
               onClick={() => onPick(s)}
-              className="w-full rounded border px-3 py-2 text-left text-[12px] disabled:opacity-50"
-              style={{ borderColor: "var(--border)", color: "var(--text)", background: "#0f1218" }}
+              className="w-full rounded-[var(--radius-sm)] border px-3.5 py-2.5 text-left text-[13px] transition-colors duration-150 hover:bg-[var(--panel-2)] disabled:opacity-50"
+              style={{ borderColor: "var(--border)", color: "var(--text)", background: "var(--panel)" }}
             >
               {s}
             </button>

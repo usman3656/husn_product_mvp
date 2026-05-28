@@ -1,3 +1,4 @@
+import { CardHeader, EvidenceChip, EmptyState, PersonaBrief, Tile } from "@/components/ui";
 import { FETCH_INIT } from "@/lib/fetch-init";
 import { RunButtonClient } from "@/components/briefs-run-button";
 
@@ -71,80 +72,49 @@ export async function BriefsCard() {
   const personas = Array.from(latestByPersona.keys());
 
   return (
-    <div
-      className="rounded-lg border p-5"
-      style={{ borderColor: "var(--border)", background: "var(--panel)" }}
-    >
-      <div className="flex items-baseline justify-between">
-        <div>
-          <h2 className="text-sm font-semibold">AI pre-meeting briefs</h2>
-          <p className="mt-0.5 text-[11px]" style={{ color: "var(--muted)" }}>
-            Step 6 · {status.provider}:{status.model} · last run{" "}
-            {timeAgo(status.last_run_at)} · {status.total_briefs} briefs total
-            {status.in_progress > 0 ? " · running…" : ""}
-          </p>
-        </div>
-        <RunButton inProgress={status.in_progress > 0} />
-      </div>
+    <Tile lift>
+      <CardHeader
+        title="Before your meeting"
+        subtitle={`Updated ${timeAgo(status.last_run_at)}${status.in_progress > 0 ? " · refreshing" : ""}`}
+        right={<RunButtonClient inProgress={status.in_progress > 0} />}
+      />
 
       {personas.length === 0 ? (
-        <p className="mt-4 text-xs" style={{ color: "var(--muted)" }}>
-          No briefs yet — agent runs every 5 min or hit "Run analysis" above.
-        </p>
+        <div className="mt-4">
+          <EmptyState
+            title="No briefs yet"
+            hint="We write a short, sourced read for each role before your meetings. Run one now or wait for the next refresh."
+          />
+        </div>
       ) : (
-        <div className="mt-4 space-y-2">
-          {personas.map((p) => (
-            <PersonaBrief key={p} brief={latestByPersona.get(p)!} />
-          ))}
+        <div className="mt-4 space-y-2.5">
+          {personas.map((p) => {
+            const brief = latestByPersona.get(p)!;
+            return (
+              <PersonaBrief
+                key={p}
+                persona={brief.persona}
+                headline={brief.content.headline}
+                meta={timeAgo(brief.generated_at)}
+              >
+                <ul className="space-y-2 text-[12.5px] leading-relaxed">
+                  {brief.content.bullets.map((b, i) => (
+                    <li key={i} className="flex gap-2">
+                      <span aria-hidden style={{ color: "var(--muted)" }}>•</span>
+                      <span>
+                        {b.text}{" "}
+                        {b.claim_ids.length > 0 && (
+                          <EvidenceChip source="Source" cite={`#${b.claim_ids.join(", ")}`} tone="accent" />
+                        )}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </PersonaBrief>
+            );
+          })}
         </div>
       )}
-    </div>
-  );
-}
-
-function RunButton({ inProgress }: { inProgress: boolean }) {
-  return <RunButtonClient inProgress={inProgress} />;
-}
-
-function PersonaBrief({ brief }: { brief: Brief }) {
-  const ago = timeAgo(brief.generated_at);
-  return (
-    <details
-      className="rounded border"
-      style={{ borderColor: "var(--border)", background: "#0f1218" }}
-    >
-      <summary
-        className="flex cursor-pointer list-none items-center justify-between px-3 py-2 text-xs"
-        style={{ color: "var(--text)" }}
-      >
-        <span className="flex items-center gap-2">
-          <span style={{ color: "var(--muted)" }}>▸</span>
-          <span
-            className="rounded px-1.5 py-0.5 text-[9px] font-mono uppercase tracking-wide"
-            style={{ background: "#6f7bff22", color: "#a5b4fc" }}
-          >
-            {brief.persona}
-          </span>
-          <span className="truncate font-medium">{brief.content.headline}</span>
-        </span>
-        <span className="shrink-0 pl-2 text-[10px]" style={{ color: "var(--muted)" }}>
-          {ago}
-        </span>
-      </summary>
-      <ul className="border-t px-3 py-2 space-y-1.5" style={{ borderColor: "var(--border)" }}>
-        {brief.content.bullets.map((b, i) => (
-          <li key={i} className="text-[11px] leading-relaxed">
-            <span>{b.text}</span>{" "}
-            <span
-              className="font-mono text-[10px]"
-              style={{ color: "var(--muted)" }}
-              title={`Cites claim ${b.claim_ids.join(", ")}`}
-            >
-              [claim {b.claim_ids.join(", ")}]
-            </span>
-          </li>
-        ))}
-      </ul>
-    </details>
+    </Tile>
   );
 }

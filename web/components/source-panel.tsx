@@ -1,3 +1,4 @@
+import { CardHeader, EmptyState, Pill, Tile } from "@/components/ui";
 import { FETCH_INIT } from "@/lib/fetch-init";
 import { DisconnectButton } from "@/components/disconnect-button";
 
@@ -69,130 +70,71 @@ export async function SourcePanel({
     (sourceKey === "jira" && jiraStatus.connections.length > 0) ||
     (sourceKey === "slack" && slackStatus.connections.length > 0);
 
+  const sub =
+    sourceKey === "jira" && isConnected
+      ? jiraStatus.connections.map((c) => c.account_label || c.site_url || `site ${c.id}`).join(", ")
+      : "Issues and epics";
+
   return (
-    <div
-      className="rounded-lg border p-5"
-      style={{ borderColor: "var(--border)", background: "var(--panel)" }}
-    >
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-sm font-semibold">{label}</h2>
-          {sourceKey === "jira" && isConnected && (
-            <p className="mt-0.5 text-[11px]" style={{ color: "var(--muted)" }}>
-              {jiraStatus.connections
-                .map((c) => c.account_label || c.site_url || `cloudId ${c.id}`)
-                .join(", ")}
-            </p>
-          )}
-          {sourceKey === "slack" && isConnected && (
-            <p className="mt-0.5 text-[11px]" style={{ color: "var(--muted)" }}>
-              {slackStatus.connections
-                .map((c) => c.team_name || c.account_label || `team ${c.id}`)
-                .join(", ")}
-            </p>
-          )}
-        </div>
-        <div className="flex items-center">
-          <SourceBadge sourceKey={sourceKey} connected={isConnected} count={items.length} />
-          {sourceKey === "jira" && isConnected && jiraStatus.connections[0] && (
-            <DisconnectButton
-              connectionId={jiraStatus.connections[0].id}
-              label={jiraStatus.connections[0].account_label || jiraStatus.connections[0].site_url || "Jira"}
-            />
-          )}
-        </div>
-      </div>
+    <Tile lift>
+      <CardHeader
+        title={label}
+        subtitle={sub}
+        right={
+          <div className="flex items-center">
+            <Pill tone={isConnected ? "success" : "neutral"}>
+              {isConnected ? `Connected · ${items.length}` : "Not connected"}
+            </Pill>
+            {sourceKey === "jira" && isConnected && jiraStatus.connections[0] && (
+              <DisconnectButton
+                connectionId={jiraStatus.connections[0].id}
+                label={
+                  jiraStatus.connections[0].account_label ||
+                  jiraStatus.connections[0].site_url ||
+                  "Jira"
+                }
+              />
+            )}
+          </div>
+        }
+      />
 
       {sourceKey === "jira" ? (
         <JiraBody items={items} isConnected={isConnected} />
-      ) : sourceKey === "slack" ? (
-        <SlackBody items={items} isConnected={isConnected} />
       ) : (
-        <PlaceholderBody sourceKey={sourceKey} />
-      )}
-    </div>
-  );
-}
-
-function SourceBadge({
-  sourceKey,
-  connected,
-  count,
-}: {
-  sourceKey: SourceKey;
-  connected: boolean;
-  count: number;
-}) {
-  if (sourceKey !== "jira" && sourceKey !== "slack") {
-    return (
-      <span
-        className="rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-wide"
-        style={{ borderColor: "var(--border)", color: "var(--muted)" }}
-      >
-        not connected
-      </span>
-    );
-  }
-  return (
-    <span
-      className="rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-wide"
-      style={{
-        borderColor: connected ? "#22c55e55" : "var(--border)",
-        color: connected ? "#86efac" : "var(--muted)",
-        background: connected ? "#22c55e11" : "transparent",
-      }}
-    >
-      {connected ? `connected · ${count}` : "not connected"}
-    </span>
-  );
-}
-
-function PlaceholderBody({ sourceKey }: { sourceKey: SourceKey }) {
-  return (
-    <>
-      <p className="mt-2 text-xs" style={{ color: "var(--muted)" }}>
-        Connect via OAuth to start ingesting artifacts. Source key:{" "}
-        <span className="font-mono">{sourceKey}</span>
-      </p>
-      <div
-        className="mt-4 h-24 rounded border border-dashed text-xs"
-        style={{ borderColor: "var(--border)" }}
-      >
-        <div className="flex h-full items-center justify-center" style={{ color: "var(--muted)" }}>
-          No artifacts yet.
+        <div className="mt-4">
+          <EmptyState title="Not connected" hint="Authorize this source to start watching it." />
         </div>
-      </div>
-    </>
+      )}
+    </Tile>
   );
 }
 
 function JiraBody({ items, isConnected }: { items: Artifact[]; isConnected: boolean }) {
   if (!isConnected) {
     return (
-      <div className="mt-4 flex items-center justify-between rounded border border-dashed p-4" style={{ borderColor: "var(--border)" }}>
-        <p className="text-xs" style={{ color: "var(--muted)" }}>
-          Authorize a Jira site to start ingesting.
-        </p>
-        <a
-          href={`${BROWSER_API_URL}/auth/jira/start`}
-          className="rounded border px-3 py-1.5 text-xs font-medium"
-          style={{ borderColor: "var(--border)", color: "var(--text)", background: "#1a1f2c" }}
+      <div className="mt-4">
+        <EmptyState
+          title="Connect Jira to start"
+          hint="Authorize a Jira site and we will start watching its issues and epics."
         >
-          Connect Jira →
-        </a>
+          <a
+            href={`${BROWSER_API_URL}/auth/jira/start`}
+            className="inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[13px] font-medium"
+            style={{ background: "var(--accent)", color: "var(--on-accent)" }}
+          >
+            Connect Jira
+            <span aria-hidden>→</span>
+          </a>
+        </EmptyState>
       </div>
     );
   }
 
   if (items.length === 0) {
     return (
-      <div className="mt-4 flex flex-col items-start gap-2 rounded border border-dashed p-4" style={{ borderColor: "var(--border)" }}>
-        <p className="text-xs" style={{ color: "var(--muted)" }}>
-          No artifacts ingested yet. Run a backfill:
-        </p>
-        <code className="font-mono text-[11px]" style={{ color: "var(--muted)" }}>
-          curl -X POST {BROWSER_API_URL}/jira/backfill
-        </code>
+      <div className="mt-4">
+        <EmptyState title="No items yet" hint="Run a backfill and Jira issues will appear here." />
       </div>
     );
   }
@@ -202,100 +144,16 @@ function JiraBody({ items, isConnected }: { items: Artifact[]; isConnected: bool
       {items.map((a) => (
         <li
           key={a.id}
-          className="flex items-baseline justify-between gap-3 rounded border px-3 py-2 text-xs"
-          style={{ borderColor: "var(--border)" }}
+          className="flex items-baseline justify-between gap-3 rounded-[var(--radius-sm)] border px-3 py-2 text-[13px]"
+          style={{ borderColor: "var(--border)", background: "var(--panel-2)" }}
         >
-          <span className="font-mono" style={{ color: "var(--muted)" }}>
+          <span className="font-mono text-[12px]" style={{ color: "var(--muted)" }}>
             {a.kind === "issue" ? (a.summary.key as string) : "·"}
           </span>
           <span className="flex-1 truncate">
-            {(a.summary.summary as string) ||
-              (a.summary.name as string) ||
-              a.external_id}
+            {(a.summary.summary as string) || (a.summary.name as string) || a.external_id}
           </span>
-          {a.summary.status ? (
-            <span
-              className="rounded border px-2 py-0.5 text-[10px]"
-              style={{ borderColor: "var(--border)", color: "var(--muted)" }}
-            >
-              {a.summary.status as string}
-            </span>
-          ) : null}
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-function SlackBody({ items, isConnected }: { items: Artifact[]; isConnected: boolean }) {
-  if (!isConnected) {
-    return (
-      <div
-        className="mt-4 flex items-center justify-between rounded border border-dashed p-4"
-        style={{ borderColor: "var(--border)" }}
-      >
-        <p className="text-xs" style={{ color: "var(--muted)" }}>
-          Authorize a Slack workspace to start ingesting.
-        </p>
-        <a
-          href={`${BROWSER_API_URL}/auth/slack/start`}
-          className="rounded border px-3 py-1.5 text-xs font-medium"
-          style={{ borderColor: "var(--border)", color: "var(--text)", background: "#1a1f2c" }}
-        >
-          Connect Slack →
-        </a>
-      </div>
-    );
-  }
-
-  if (items.length === 0) {
-    return (
-      <div
-        className="mt-4 flex flex-col items-start gap-2 rounded border border-dashed p-4"
-        style={{ borderColor: "var(--border)" }}
-      >
-        <p className="text-xs" style={{ color: "var(--muted)" }}>
-          No artifacts ingested yet. Run a backfill:
-        </p>
-        <code className="font-mono text-[11px]" style={{ color: "var(--muted)" }}>
-          curl -X POST {BROWSER_API_URL}/slack/backfill
-        </code>
-      </div>
-    );
-  }
-
-  return (
-    <ul className="mt-4 space-y-1.5">
-      {items.map((a) => (
-        <li
-          key={a.id}
-          className="flex items-baseline justify-between gap-3 rounded border px-3 py-2 text-xs"
-          style={{ borderColor: "var(--border)" }}
-        >
-          <span className="font-mono" style={{ color: "var(--muted)" }}>
-            {a.kind === "message"
-              ? `#${(a.summary.channel as string) || "?"}`
-              : a.kind === "channel"
-                ? "#"
-                : a.kind === "user"
-                  ? "@"
-                  : "·"}
-          </span>
-          <span className="flex-1 truncate">
-            {a.kind === "message"
-              ? (a.summary.text as string) || "(empty message)"
-              : a.kind === "channel"
-                ? (a.summary.name as string)
-                : a.kind === "user"
-                  ? (a.summary.name as string)
-                  : a.external_id}
-          </span>
-          <span
-            className="rounded border px-2 py-0.5 text-[10px]"
-            style={{ borderColor: "var(--border)", color: "var(--muted)" }}
-          >
-            {a.kind}
-          </span>
+          {a.summary.status ? <Pill tone="neutral">{a.summary.status as string}</Pill> : null}
         </li>
       ))}
     </ul>

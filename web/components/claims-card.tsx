@@ -1,3 +1,4 @@
+import { CardHeader, EmptyState, EvidenceChip, Pill, Tile } from "@/components/ui";
 import { FETCH_INIT } from "@/lib/fetch-init";
 const SERVER_API_URL = process.env.API_URL ?? "http://api:8000";
 
@@ -74,13 +75,11 @@ function timeAgo(iso: string | null): string {
   return `${Math.floor(s / 86400)}d ago`;
 }
 
-const KIND_COLOR: Record<string, string> = {
-  date: "#60a5fa",
-  owner: "#a78bfa",
-  status: "#34d399",
-  decision: "#f59e0b",
-  scope: "#f97316",
-  dependency: "#ec4899",
+const SOURCE_LABEL: Record<string, string> = {
+  jira: "Jira",
+  slack: "Slack",
+  google: "Google",
+  microsoft: "Microsoft",
 };
 
 export async function ClaimsCard() {
@@ -91,87 +90,58 @@ export async function ClaimsCard() {
   const kinds = Object.entries(summary.by_kind).sort((a, b) => b[1] - a[1]);
 
   return (
-    <div
-      className="rounded-lg border p-5"
-      style={{ borderColor: "var(--border)", background: "var(--panel)" }}
-    >
-      <div className="flex items-baseline justify-between">
-        <div>
-          <h2 className="text-sm font-semibold">Claims</h2>
-          <p className="mt-0.5 text-[11px]" style={{ color: "var(--muted)" }}>
-            Step 3 · evidence-linked · last run {timeAgo(summary.last_extracted_at)} ·{" "}
-            {summary.pending_artifacts} pending
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-1.5">
-          {kinds.map(([k, n]) => (
-            <span
-              key={k}
-              className="rounded-full border px-2 py-0.5 text-[10px] font-mono"
-              style={{
-                borderColor: (KIND_COLOR[k] || "var(--border)") + "55",
-                color: KIND_COLOR[k] || "var(--muted)",
-                background: (KIND_COLOR[k] || "#000") + "11",
-              }}
-            >
-              {k} {n}
-            </span>
-          ))}
-        </div>
-      </div>
+    <Tile lift>
+      <CardHeader
+        title="Facts we pulled from your tools"
+        subtitle={`Updated ${timeAgo(summary.last_extracted_at)}`}
+        right={
+          <div className="flex flex-wrap justify-end gap-1.5">
+            {kinds.slice(0, 4).map(([k, n]) => (
+              <Pill key={k} tone="neutral">
+                {k} {n}
+              </Pill>
+            ))}
+          </div>
+        }
+      />
 
       {claims.length === 0 ? (
-        <p className="mt-4 text-xs" style={{ color: "var(--muted)" }}>
-          No claims yet — extractors run on new artifacts every ~15s.
-        </p>
+        <div className="mt-4">
+          <EmptyState
+            title="No facts yet"
+            hint="As your tools sync, the dates, owners, and decisions we find will appear here, each linked to where it came from."
+          />
+        </div>
       ) : (
-        <ul className="mt-4 space-y-1.5">
-          {claims.slice(0, 14).map((c) => (
+        <ul className="mt-4 space-y-2">
+          {claims.slice(0, 12).map((c) => (
             <ClaimRow key={c.id} claim={c} />
           ))}
         </ul>
       )}
-    </div>
+    </Tile>
   );
 }
 
 function ClaimRow({ claim }: { claim: Claim }) {
-  const color = KIND_COLOR[claim.kind] || "var(--muted)";
   const valueText = claim.value_norm || claim.value || "(empty)";
   const anchor = claim.source_anchor;
-  const snippet = anchor.kind === "span" ? anchor.snippet : `field: ${anchor.field_path}`;
+  const snippet = anchor.kind === "span" ? anchor.snippet : anchor.field_path;
 
   return (
     <li
-      className="rounded border px-3 py-2 text-[11px]"
-      style={{ borderColor: "var(--border)" }}
+      className="rounded-[var(--radius-sm)] border px-3 py-2.5"
+      style={{ borderColor: "var(--border)", background: "var(--panel-2)" }}
     >
       <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <span
-            className="rounded px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wide"
-            style={{ background: color + "22", color }}
-          >
-            {claim.kind}
-          </span>
-          <span className="font-mono" style={{ color: "var(--muted)" }}>
-            {claim.key}
-          </span>
-          <span>= {valueText}</span>
+        <div className="flex min-w-0 items-center gap-2">
+          <Pill tone="neutral">{claim.kind}</Pill>
+          <span className="truncate text-[13px]">{valueText}</span>
         </div>
-        <div className="flex items-center gap-2 text-[10px]" style={{ color: "var(--muted)" }}>
-          <span>conf {claim.confidence.toFixed(2)}</span>
-          <span>
-            {claim.artifact.source}.{claim.artifact.kind}
-          </span>
-        </div>
+        <EvidenceChip source={SOURCE_LABEL[claim.artifact.source] ?? claim.artifact.source} />
       </div>
-      <p
-        className="mt-1 truncate font-mono text-[10px]"
-        style={{ color: "var(--muted)" }}
-        title={snippet}
-      >
-        ↳ {snippet}
+      <p className="mt-1 truncate text-[11px]" style={{ color: "var(--muted)" }} title={snippet}>
+        {snippet}
       </p>
     </li>
   );

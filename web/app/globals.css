@@ -2,17 +2,178 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ---------------------------------------------------------------------------
+   husn.ai design system: calm, Apple-light. Color = meaning only.
+   Light tokens here; full dark set behind prefers-color-scheme: dark below.
+--------------------------------------------------------------------------- */
 :root {
-  --bg: #0b0d12;
-  --panel: #11141b;
-  --border: #1f2330;
-  --muted: #8b93a7;
-  --text: #e7eaf2;
-  --accent: #6f7bff;
+  /* Surfaces + ink */
+  --bg: #f5f5f7;
+  --bg-grad-a: #fbfbfd;
+  --bg-grad-b: #eef0f4;
+  --panel: #ffffff;
+  --panel-2: #f6f7f9; /* quiet inset surface (stats, nested rows) */
+  --border: #e3e4e8; /* hairline */
+  --border-strong: #d2d4da;
+  --text: #1d1d1f;
+  --text-2: #424245; /* secondary ink for body */
+  --muted: #6e6e73;
+  --muted-2: #86868b;
+
+  /* Action (blue) */
+  --accent: #0071e3;
+  --accent-press: #0062c4;
+  --accent-ink: #0a5ec0; /* text on accent-soft */
+  --accent-soft: #e8f1fd;
+  --accent-line: #bcdcfb;
+  --on-accent: #ffffff;
+
+  /* Conflict (red) */
+  --danger: #d70015;
+  --danger-ink: #b00010;
+  --danger-soft: #fdecec;
+  --danger-line: #f6c9c9;
+
+  /* Risk (amber) */
+  --warning: #b25000;
+  --warning-ink: #8f4000;
+  --warning-soft: #fdf1e3;
+  --warning-line: #f3d9b3;
+
+  /* In-sync (green) */
+  --success: #1f8a4c;
+  --success-ink: #176b3b;
+  --success-soft: #e7f5ec;
+  --success-line: #bfe4cd;
+
+  /* Dark promo tile (used sparingly for rhythm) */
+  --dark-panel: #1d1d1f;
+  --dark-panel-2: #2a2a2c;
+  --dark-text: #f5f5f7;
+  --dark-muted: #a1a1a6;
+  --dark-border: #38383a;
+
+  /* Shape + depth */
+  --radius-sm: 12px;
+  --radius: 18px;
+  --radius-lg: 22px;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 10px rgba(0, 0, 0, 0.06), 0 16px 32px rgba(0, 0, 0, 0.09);
+  --ring: 0 0 0 3px rgba(0, 113, 227, 0.35);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0a0a0b;
+    --bg-grad-a: #161618;
+    --bg-grad-b: #0a0a0b;
+    --panel: #1c1c1e;
+    --panel-2: #2a2a2c;
+    --border: #38383a;
+    --border-strong: #48484a;
+    --text: #f5f5f7;
+    --text-2: #d2d2d6;
+    --muted: #a1a1a6;
+    --muted-2: #8a8a8f;
+
+    --accent: #2997ff;
+    --accent-press: #4aa8ff;
+    --accent-ink: #7cc0ff;
+    --accent-soft: #14304b;
+    --accent-line: #1f4a73;
+    --on-accent: #ffffff;
+
+    --danger: #ff453a;
+    --danger-ink: #ff7a72;
+    --danger-soft: #3a1714;
+    --danger-line: #5e241f;
+
+    --warning: #ff9f0a;
+    --warning-ink: #ffc163;
+    --warning-soft: #3a2a10;
+    --warning-line: #5e441a;
+
+    --success: #30d158;
+    --success-ink: #6fe08c;
+    --success-soft: #11331d;
+    --success-line: #1f5232;
+
+    --dark-panel: #2a2a2c;
+    --dark-panel-2: #3a3a3c;
+    --dark-text: #f5f5f7;
+    --dark-muted: #a1a1a6;
+    --dark-border: #48484a;
+
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5), 0 4px 14px rgba(0, 0, 0, 0.5);
+    --shadow-md: 0 6px 16px rgba(0, 0, 0, 0.6), 0 20px 40px rgba(0, 0, 0, 0.6);
+    --ring: 0 0 0 3px rgba(41, 151, 255, 0.45);
+  }
 }
 
 html,
 body {
   background: var(--bg);
+  background-image: radial-gradient(
+    140% 120% at 50% 0%,
+    var(--bg-grad-a) 0%,
+    var(--bg-grad-b) 100%
+  );
+  background-attachment: fixed;
   color: var(--text);
+  letter-spacing: -0.011em;
+}
+
+h1,
+h2,
+h3 {
+  letter-spacing: -0.022em;
+}
+
+/* Focus: visible, keyboard-only ring on every interactive element. */
+:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+  border-radius: 8px;
+}
+
+/* Gentle mount: fade + slight lift. Respects reduced motion below. */
+@keyframes husn-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.husn-rise {
+  animation: husn-rise 0.32s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+/* Hover lift for cards/tiles */
+.husn-lift {
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease,
+    border-color 0.2s ease;
+}
+.husn-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+  .husn-lift:hover {
+    transform: none;
+  }
 }

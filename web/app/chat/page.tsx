@@ -1,25 +1,18 @@
-import Link from "next/link";
-
 import { ChatRoom } from "@/components/chat-room";
 
 export const metadata = {
-  title: "Chat — husn.io",
+  title: "Ask Husn · husn.ai",
 };
 
 export default function ChatPage() {
   return (
-    <main className="mx-auto max-w-6xl px-6 py-8">
-      <header className="mb-6 flex items-baseline justify-between">
-        <div>
-          <Link className="text-xs" style={{ color: "var(--muted)" }} href="/">
-            ← Back to dashboard
-          </Link>
-          <h1 className="mt-2 text-2xl font-semibold tracking-tight">Ask Husn</h1>
-          <p className="text-sm" style={{ color: "var(--muted)" }}>
-            Free-form Q&amp;A grounded in your operational graph. Every answer cites
-            claim ids / artifact ids that you can click through to the source.
-          </p>
-        </div>
+    <main className="mx-auto max-w-6xl px-5 py-8 sm:px-6">
+      <header className="mb-6 husn-rise">
+        <h1 className="text-[28px] font-semibold tracking-tight">Ask Husn</h1>
+        <p className="mt-1 max-w-2xl text-[14px]" style={{ color: "var(--muted)" }}>
+          Ask anything about your program. Every answer points back to the message,
+          ticket, or doc it came from, so you can check the source.
+        </p>
       </header>
       <ChatRoom />
     </main>

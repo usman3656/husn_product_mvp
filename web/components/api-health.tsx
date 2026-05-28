@@ -1,3 +1,4 @@
+import { Dot, Tile } from "@/components/ui";
 import { FETCH_INIT } from "@/lib/fetch-init";
 // Server-side fetch (this is a server component): use API_URL which points to
 // the api service inside the docker network. Browser-facing copy still uses
@@ -22,25 +23,19 @@ export async function ApiHealth() {
   const ok = health?.status === "ok";
 
   return (
-    <div
-      className="flex items-center justify-between rounded-lg border px-4 py-3"
-      style={{ borderColor: "var(--border)", background: "var(--panel)" }}
-    >
-      <div>
-        <p className="text-xs uppercase tracking-wide" style={{ color: "var(--muted)" }}>
-          API
+    <Tile lift className="flex items-center justify-between">
+      <div className="min-w-0">
+        <p className="text-[12px] font-medium" style={{ color: "var(--muted)" }}>
+          Service
         </p>
-        <p className="font-mono text-sm">{BROWSER_API_URL}</p>
+        <p className="truncate font-mono text-[13px]">{BROWSER_API_URL}</p>
       </div>
-      <div className="flex items-center gap-2">
-        <span
-          className="inline-block h-2 w-2 rounded-full"
-          style={{ background: ok ? "#3ecf8e" : "#ef4444" }}
-        />
-        <span className="text-sm">
-          {ok ? `ok (v${health?.version ?? "?"})` : "unreachable"}
+      <div className="flex shrink-0 items-center gap-2">
+        <Dot tone={ok ? "success" : "danger"} />
+        <span className="text-[13px] font-medium">
+          {ok ? `Online (v${health?.version ?? "?"})` : "Unreachable"}
         </span>
       </div>
-    </div>
+    </Tile>
   );
 }

@@ -1,26 +1,17 @@
-import Link from "next/link";
-
 import { ConnectionsList } from "@/components/connections-list";
 
 export const metadata = {
-  title: "Connections — husn.io",
+  title: "Connections · husn.ai",
 };
 
 export default function ConnectionsPage() {
   return (
-    <main className="mx-auto max-w-5xl px-6 py-10">
-      <header className="mb-8">
-        <Link
-          href="/"
-          className="text-xs"
-          style={{ color: "var(--muted)" }}
-        >
-          ← Back to dashboard
-        </Link>
-        <h1 className="mt-2 text-2xl font-semibold tracking-tight">Connections</h1>
-        <p className="text-sm" style={{ color: "var(--muted)" }}>
-          Authorized source connections, token health, last sync, and counts.
-          Disconnecting stops syncing — historical data is kept.
+    <main className="mx-auto max-w-4xl px-5 py-8 sm:px-6">
+      <header className="mb-8 husn-rise">
+        <h1 className="text-[28px] font-semibold tracking-tight">Connections</h1>
+        <p className="mt-1 max-w-2xl text-[14px]" style={{ color: "var(--muted)" }}>
+          The tools we watch, their status, and when we last synced. Disconnecting stops
+          new syncs; your past data is kept.
         </p>
       </header>
 

@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import { DEMO_MODE } from "@/lib/demo";
+import { Pill } from "@/components/ui";
 
 const BROWSER_API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -10,17 +11,9 @@ export function RunButtonClient({ inProgress }: { inProgress: boolean }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
-  // No backend in the static demo — show a disabled "demo snapshot" pill.
+  // No backend in the static demo: show a calm "snapshot" pill, no controls.
   if (DEMO_MODE) {
-    return (
-      <span
-        className="rounded border px-3 py-1.5 text-xs font-medium"
-        style={{ borderColor: "var(--border)", color: "var(--muted)", background: "#0f1218" }}
-        title="This is a static snapshot — live re-runs are disabled"
-      >
-        demo snapshot
-      </span>
-    );
+    return <Pill tone="neutral">Snapshot</Pill>;
   }
 
   async function trigger() {
@@ -36,7 +29,7 @@ export function RunButtonClient({ inProgress }: { inProgress: boolean }) {
       } else {
         const body = await r.json();
         const jobId = body.job_id ?? "queued";
-        setMessage(`queued ${String(jobId).slice(0, 8)} · refresh in ~10-30s`);
+        setMessage(`queued, refresh in a moment (${String(jobId).slice(0, 8)})`);
       }
     } catch (e) {
       setMessage(e instanceof Error ? e.message : "request failed");
@@ -49,17 +42,17 @@ export function RunButtonClient({ inProgress }: { inProgress: boolean }) {
   return (
     <div className="flex items-center gap-2">
       {message && (
-        <span className="text-[10px]" style={{ color: "var(--muted)" }}>
+        <span className="text-[11px]" style={{ color: "var(--muted)" }}>
           {message}
         </span>
       )}
       <button
         onClick={trigger}
         disabled={disabled}
-        className="rounded border px-3 py-1.5 text-xs font-medium disabled:opacity-50"
-        style={{ borderColor: "var(--border)", color: "var(--text)", background: "#1a1f2c" }}
+        className="rounded-full border px-3.5 py-1.5 text-[13px] font-medium transition-colors duration-150 disabled:opacity-50"
+        style={{ borderColor: "var(--border-strong)", color: "var(--text)", background: "var(--panel)" }}
       >
-        {busy ? "Queuing…" : inProgress ? "Running…" : "Run analysis"}
+        {busy ? "Starting" : inProgress ? "Refreshing" : "Refresh briefs"}
       </button>
     </div>
   );

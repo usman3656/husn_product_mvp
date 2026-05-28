@@ -25,9 +25,9 @@ async function fetchKind(kind: string, limit = 10): Promise<Artifact[]> {
 }
 
 function timeAgo(iso: string | null): string {
-  if (!iso) return "—";
+  if (!iso) return "·";
   const t = new Date(iso).getTime();
-  if (!Number.isFinite(t)) return "—";
+  if (!Number.isFinite(t)) return "·";
   const s = Math.max(0, Math.floor((Date.now() - t) / 1000));
   if (s < 60) return `${s}s ago`;
   if (s < 3600) return `${Math.floor(s / 60)}m ago`;
@@ -48,7 +48,7 @@ export async function GoogleFeed() {
         className="mt-4 rounded border border-dashed p-4 text-xs"
         style={{ borderColor: "var(--border)", color: "var(--muted)" }}
       >
-        Allowlist saved but no items ingested yet — backfill runs every minute at :15.
+        Saved, but nothing is here yet. New items appear within a minute.
       </div>
     );
   }
@@ -116,17 +116,23 @@ function Section({
   return (
     <details
       open={defaultOpen}
-      className="rounded border"
-      style={{ borderColor: "var(--border)", background: "#0f1218" }}
+      className="group rounded-[var(--radius-sm)] border"
+      style={{ borderColor: "var(--border)", background: "var(--panel-2)" }}
     >
       <summary
-        className="flex cursor-pointer list-none items-center justify-between px-3 py-2 text-xs"
+        className="flex cursor-pointer list-none items-center justify-between px-3 py-2 text-[13px]"
         style={{ color: "var(--text)" }}
       >
         <span className="flex items-center gap-2">
-          <span style={{ color: "var(--muted)" }}>▸</span>
-          <span>{icon}</span>
-          <span>{label}</span>
+          <span
+            aria-hidden
+            className="text-[11px] transition-transform duration-200 group-open:rotate-90"
+            style={{ color: "var(--muted)" }}
+          >
+            ▸
+          </span>
+          <span aria-hidden>{icon}</span>
+          <span className="font-medium">{label}</span>
         </span>
       </summary>
       <ul className="border-t px-3 py-2 space-y-1" style={{ borderColor: "var(--border)" }}>

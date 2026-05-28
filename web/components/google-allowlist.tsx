@@ -183,7 +183,7 @@ export function GoogleAllowlist() {
       setStatus(
         queued
           ? `Saved. Backfill queued (${queued.slice(0, 8)}). Refresh in ~60s.`
-          : "Saved. Backfill task not yet registered — wires up next session.",
+          : "Saved. Syncing will pick this up shortly.",
       );
     } catch (e) {
       setError(e instanceof Error ? e.message : "save failed");
@@ -201,7 +201,7 @@ export function GoogleAllowlist() {
   }
   if (error) {
     return (
-      <p className="mt-4 text-xs" style={{ color: "#fca5a5" }}>
+      <p className="mt-4 text-xs" style={{ color: "var(--danger-ink)" }}>
         {error}
       </p>
     );
@@ -299,44 +299,44 @@ export function GoogleAllowlist() {
       <div className="space-y-2 border-t pt-3" style={{ borderColor: "var(--border)" }}>
         {status && (
           <div
-            className="rounded border px-3 py-2 text-[11px]"
+            className="rounded-[var(--radius-sm)] border px-3 py-2 text-[11px]"
             style={{
-              borderColor: "#22c55e55",
-              background: "#22c55e15",
-              color: "#86efac",
+              borderColor: "var(--success-line)",
+              background: "var(--success-soft)",
+              color: "var(--success-ink)",
             }}
           >
-            ✓ {status}
+            {status}
           </div>
         )}
         {error && (
           <div
-            className="rounded border px-3 py-2 text-[11px]"
+            className="rounded-[var(--radius-sm)] border px-3 py-2 text-[11px]"
             style={{
-              borderColor: "#ef444466",
-              background: "#ef444415",
-              color: "#fca5a5",
+              borderColor: "var(--danger-line)",
+              background: "var(--danger-soft)",
+              color: "var(--danger-ink)",
             }}
           >
-            ✗ {error}
+            {error}
           </div>
         )}
         <div className="flex items-center justify-between">
           <p className="text-[11px]" style={{ color: "var(--muted)" }}>
-            Picking a folder ingests every Doc / Sheet inside it (recursive). Nothing is
-            read until you save.
+            Picking a folder watches every Doc and Sheet inside it. Nothing is read until
+            you save.
           </p>
           <button
             onClick={save}
             disabled={saving}
-            className="rounded border px-3 py-1.5 text-xs font-medium disabled:opacity-50"
+            className="rounded-full border px-3.5 py-1.5 text-[13px] font-medium disabled:opacity-50"
             style={{
-              borderColor: "var(--border)",
-              color: "var(--text)",
-              background: "#1a1f2c",
+              borderColor: "var(--accent)",
+              color: "var(--on-accent)",
+              background: "var(--accent)",
             }}
           >
-            {saving ? "Saving…" : "Save allowlist"}
+            {saving ? "Saving…" : "Save"}
           </button>
         </div>
       </div>

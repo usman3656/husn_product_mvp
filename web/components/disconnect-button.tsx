@@ -13,15 +13,16 @@ export function DisconnectButton({
   connectionId: number;
   label: string;
 }) {
-  // No backend in the static demo — disconnect would 404. Hide it.
-  if (DEMO_MODE) return null;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // No backend in the static demo (disconnect would 404). Hide it.
+  if (DEMO_MODE) return null;
 
   async function go() {
     if (
       !confirm(
-        `Disconnect ${label}?\n\nThis wipes the OAuth token and allowlist. Historical data is kept; new syncs stop until you reconnect.`,
+        `Disconnect ${label}? This clears the saved access and allowlist. Past data is kept; new syncs stop until you reconnect.`,
       )
     ) {
       return;
@@ -46,17 +47,13 @@ export function DisconnectButton({
         onClick={go}
         disabled={busy}
         title={`Disconnect ${label}`}
-        className="rounded border px-1.5 py-0.5 text-[10px] font-medium disabled:opacity-50"
-        style={{
-          borderColor: "#ef444466",
-          color: "#fca5a5",
-          background: "#ef444411",
-        }}
+        className="rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors duration-150 disabled:opacity-50"
+        style={{ borderColor: "var(--danger-line)", color: "var(--danger-ink)", background: "var(--danger-soft)" }}
       >
-        {busy ? "…" : "disconnect"}
+        {busy ? "…" : "Disconnect"}
       </button>
       {error && (
-        <span className="text-[10px]" style={{ color: "#fca5a5" }}>
+        <span className="text-[11px]" style={{ color: "var(--danger-ink)" }}>
           {error}
         </span>
       )}

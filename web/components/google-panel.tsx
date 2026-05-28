@@ -1,3 +1,4 @@
+import { CardHeader, EmptyState, Pill, Tile } from "@/components/ui";
 import { FETCH_INIT } from "@/lib/fetch-init";
 import { DEMO_MODE } from "@/lib/demo";
 import { DisconnectButton } from "@/components/disconnect-button";
@@ -32,89 +33,59 @@ async function fetchStatus(): Promise<GoogleStatus> {
 export async function GooglePanel() {
   const status = await fetchStatus();
   const isConnected = status.connections.length > 0;
+  const sub = isConnected
+    ? status.connections.map((c) => c.email || c.account_label || `account ${c.id}`).join(", ")
+    : "Gmail and Drive";
 
   return (
-    <div
-      className="rounded-lg border p-5"
-      style={{ borderColor: "var(--border)", background: "var(--panel)" }}
-    >
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-sm font-semibold">Google (Gmail + Drive)</h2>
-          {isConnected && (
-            <p className="mt-0.5 text-[11px]" style={{ color: "var(--muted)" }}>
-              {status.connections
-                .map((c) => c.email || c.account_label || `account ${c.id}`)
-                .join(", ")}
-            </p>
-          )}
-        </div>
-        <div className="flex items-center">
-          <span
-            className="rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-wide"
-            style={{
-              borderColor: isConnected ? "#22c55e55" : "var(--border)",
-              color: isConnected ? "#86efac" : "var(--muted)",
-              background: isConnected ? "#22c55e11" : "transparent",
-            }}
-          >
-            {isConnected ? "connected" : "not connected"}
-          </span>
-          {isConnected && status.connections[0] && (
-            <DisconnectButton
-              connectionId={status.connections[0].id}
-              label={status.connections[0].email || status.connections[0].account_label || "Google"}
-            />
-          )}
-        </div>
-      </div>
+    <Tile lift>
+      <CardHeader
+        title="Google"
+        subtitle={sub}
+        right={
+          <div className="flex items-center">
+            <Pill tone={isConnected ? "success" : "neutral"}>
+              {isConnected ? "Connected" : "Not connected"}
+            </Pill>
+            {isConnected && status.connections[0] && (
+              <DisconnectButton
+                connectionId={status.connections[0].id}
+                label={status.connections[0].email || status.connections[0].account_label || "Google"}
+              />
+            )}
+          </div>
+        }
+      />
 
       {!isConnected ? (
-        <NotConnected />
+        <div className="mt-4">
+          <EmptyState
+            title="Connect Google to start"
+            hint="We only read what you allow. Nothing is pulled until you pick the labels and folders to watch."
+          >
+            <a
+              href={`${BROWSER_API_URL}/auth/google/start`}
+              className="inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[13px] font-medium"
+              style={{ background: "var(--accent)", color: "var(--on-accent)" }}
+            >
+              Connect Google
+              <span aria-hidden>→</span>
+            </a>
+          </EmptyState>
+        </div>
       ) : (
         <>
           <GoogleFeed />
           {!DEMO_MODE && (
             <details className="mt-4">
-              <summary
-                className="cursor-pointer text-[11px] underline"
-                style={{ color: "var(--muted)" }}
-              >
-                Edit allowlist (labels + folders)
+              <summary className="cursor-pointer text-[12px]" style={{ color: "var(--accent-ink)" }}>
+                Edit what we watch (labels and folders)
               </summary>
               <GoogleAllowlist />
             </details>
           )}
         </>
       )}
-    </div>
+    </Tile>
   );
 }
-
-function NotConnected() {
-  return (
-    <div
-      className="mt-4 flex items-center justify-between rounded border border-dashed p-4"
-      style={{ borderColor: "var(--border)" }}
-    >
-      <div>
-        <p className="text-xs" style={{ color: "var(--muted)" }}>
-          Authorize a Google account to start ingesting.
-        </p>
-        <p className="mt-1 text-[10px]" style={{ color: "var(--muted)" }}>
-          Scopes: <code className="font-mono">gmail.readonly</code>,{" "}
-          <code className="font-mono">drive.readonly</code>. Nothing is read until you
-          pick a label / folder allowlist.
-        </p>
-      </div>
-      <a
-        href={`${BROWSER_API_URL}/auth/google/start`}
-        className="ml-4 shrink-0 rounded border px-3 py-1.5 text-xs font-medium"
-        style={{ borderColor: "var(--border)", color: "var(--text)", background: "#1a1f2c" }}
-      >
-        Connect Google →
-      </a>
-    </div>
-  );
-}
-
