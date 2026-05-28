@@ -14,7 +14,7 @@ export default function ChatPage() {
           <Link className="text-xs" style={{ color: "var(--muted)" }} href="/">
             ← Back to dashboard
           </Link>
-          <h1 className="mt-2 text-2xl font-semibold tracking-tight">Ask the AI TPM</h1>
+          <h1 className="mt-2 text-2xl font-semibold tracking-tight">Ask Husn</h1>
           <p className="text-sm" style={{ color: "var(--muted)" }}>
             Free-form Q&amp;A grounded in your operational graph. Every answer cites
             claim ids / artifact ids that you can click through to the source.

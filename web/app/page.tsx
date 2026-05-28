@@ -32,7 +32,7 @@ export default function Home() {
               background: "#6f7bff11",
             }}
           >
-            Ask the AI TPM →
+            Ask Husn →
           </Link>
           <Link
             href="/connections"
