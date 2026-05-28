@@ -1,3 +1,4 @@
+import { FETCH_INIT } from "@/lib/fetch-init";
 // Server-side fetch (this is a server component): use API_URL which points to
 // the api service inside the docker network. Browser-facing copy still uses
 // NEXT_PUBLIC_API_URL so the visible string matches where the user can curl.
@@ -8,7 +9,7 @@ type Health = { status: string; version?: string };
 
 async function fetchHealth(): Promise<Health | null> {
   try {
-    const res = await fetch(`${SERVER_API_URL}/health`, { cache: "no-store" });
+    const res = await fetch(`${SERVER_API_URL}/health`, FETCH_INIT);
     if (!res.ok) return null;
     return (await res.json()) as Health;
   } catch {

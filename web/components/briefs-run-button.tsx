@@ -2,11 +2,26 @@
 
 import { useState } from "react";
 
+import { DEMO_MODE } from "@/lib/demo";
+
 const BROWSER_API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 export function RunButtonClient({ inProgress }: { inProgress: boolean }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+
+  // No backend in the static demo — show a disabled "demo snapshot" pill.
+  if (DEMO_MODE) {
+    return (
+      <span
+        className="rounded border px-3 py-1.5 text-xs font-medium"
+        style={{ borderColor: "var(--border)", color: "var(--muted)", background: "#0f1218" }}
+        title="This is a static snapshot — live re-runs are disabled"
+      >
+        demo snapshot
+      </span>
+    );
+  }
 
   async function trigger() {
     setBusy(true);

@@ -1,3 +1,4 @@
+import { FETCH_INIT } from "@/lib/fetch-init";
 import { DisconnectButton } from "@/components/disconnect-button";
 
 const SERVER_API_URL = process.env.API_URL ?? "http://api:8000";
@@ -29,7 +30,7 @@ type Status = { connections: { id: number; team_name: string | null; account_lab
 
 async function fetchFeed(): Promise<Feed> {
   try {
-    const res = await fetch(`${SERVER_API_URL}/api/slack/feed`, { cache: "no-store" });
+    const res = await fetch(`${SERVER_API_URL}/api/slack/feed`, FETCH_INIT);
     if (!res.ok) return { channels: [], total_messages: 0 };
     return (await res.json()) as Feed;
   } catch {
@@ -39,7 +40,7 @@ async function fetchFeed(): Promise<Feed> {
 
 async function fetchStatus(): Promise<Status> {
   try {
-    const res = await fetch(`${SERVER_API_URL}/auth/slack/status`, { cache: "no-store" });
+    const res = await fetch(`${SERVER_API_URL}/auth/slack/status`, FETCH_INIT);
     if (!res.ok) return { connections: [] };
     return (await res.json()) as Status;
   } catch {

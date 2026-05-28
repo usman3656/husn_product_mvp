@@ -1,3 +1,4 @@
+import { FETCH_INIT } from "@/lib/fetch-init";
 import { DisconnectButton } from "@/components/disconnect-button";
 
 const SERVER_API_URL = process.env.API_URL ?? "http://api:8000";
@@ -18,9 +19,7 @@ type ListResponse = { count: number; items: Artifact[] };
 
 async function fetchArtifacts(source: SourceKey): Promise<ListResponse> {
   try {
-    const res = await fetch(`${SERVER_API_URL}/api/artifacts?source=${source}&limit=25`, {
-      cache: "no-store",
-    });
+    const res = await fetch(`${SERVER_API_URL}/api/artifacts?source=${source}&limit=25`, FETCH_INIT);
     if (!res.ok) return { count: 0, items: [] };
     return (await res.json()) as ListResponse;
   } catch {
@@ -34,7 +33,7 @@ type JiraStatus = {
 
 async function fetchJiraStatus(): Promise<JiraStatus> {
   try {
-    const res = await fetch(`${SERVER_API_URL}/auth/jira/status`, { cache: "no-store" });
+    const res = await fetch(`${SERVER_API_URL}/auth/jira/status`, FETCH_INIT);
     if (!res.ok) return { connections: [] };
     return (await res.json()) as JiraStatus;
   } catch {
@@ -48,7 +47,7 @@ type SlackStatus = {
 
 async function fetchSlackStatus(): Promise<SlackStatus> {
   try {
-    const res = await fetch(`${SERVER_API_URL}/auth/slack/status`, { cache: "no-store" });
+    const res = await fetch(`${SERVER_API_URL}/auth/slack/status`, FETCH_INIT);
     if (!res.ok) return { connections: [] };
     return (await res.json()) as SlackStatus;
   } catch {
@@ -214,14 +213,14 @@ function JiraBody({ items, isConnected }: { items: Artifact[]; isConnected: bool
               (a.summary.name as string) ||
               a.external_id}
           </span>
-          {a.summary.status && (
+          {a.summary.status ? (
             <span
               className="rounded border px-2 py-0.5 text-[10px]"
               style={{ borderColor: "var(--border)", color: "var(--muted)" }}
             >
               {a.summary.status as string}
             </span>
-          )}
+          ) : null}
         </li>
       ))}
     </ul>

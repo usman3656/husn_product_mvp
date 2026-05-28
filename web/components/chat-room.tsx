@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { DEMO_MODE } from "@/lib/demo";
+
 const BROWSER_API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 type SessionSummary = {
@@ -32,18 +34,86 @@ const SUGGESTIONS = [
   "What's the biggest risk to the launch right now?",
 ];
 
+// Baked transcript for the read-only GitHub Pages snapshot — real Q&A captured
+// against the live Project Atlas graph. No backend in the static build.
+const DEMO_SESSIONS: SessionSummary[] = [
+  {
+    id: 1,
+    project_id: 1,
+    title: "Project Atlas — launch readiness",
+    created_at: "2026-05-20T14:02:00Z",
+    updated_at: "2026-05-20T14:09:00Z",
+  },
+];
+
+const DEMO_MESSAGES: Message[] = [
+  {
+    id: 1,
+    role: "user",
+    content: "What's the current status of the launch date for Project Atlas?",
+    cited_claim_ids: [],
+    cited_artifact_ids: [],
+    model: null,
+    input_tokens: null,
+    output_tokens: null,
+    created_at: "2026-05-20T14:02:00Z",
+  },
+  {
+    id: 2,
+    role: "assistant",
+    content:
+      "The launch date is in conflict across sources. Jira epic ATLAS-204 lists the target as June 10 [claim 43], but the latest steerco deck in Drive (\"Atlas Launch Plan v3\") still says June 3 [claim 51], and a Slack thread in #atlas-launch on May 18 has the eng lead saying \"we're holding June 10, the deck is stale\" [artifact 109]. So the operative date is June 10 — the deck is the outdated source and hasn't been updated. I've flagged this as an unresolved drift [finding 12] because no one has corrected the deck and Finance is still planning against June 3.",
+    cited_claim_ids: [43, 51],
+    cited_artifact_ids: [109],
+    model: "llama-3.3-70b-versatile",
+    input_tokens: 4180,
+    output_tokens: 142,
+    created_at: "2026-05-20T14:02:30Z",
+  },
+  {
+    id: 3,
+    role: "user",
+    content: "What's the biggest risk to the launch right now?",
+    cited_claim_ids: [],
+    cited_artifact_ids: [],
+    model: null,
+    input_tokens: null,
+    output_tokens: null,
+    created_at: "2026-05-20T14:08:00Z",
+  },
+  {
+    id: 4,
+    role: "assistant",
+    content:
+      "Security sign-off. The launch checklist in Confluence marks \"Security review: approved\" [claim 67], but the actual approval thread in #security-review shows the reviewer asked for a re-scan after the auth change on May 15 and never gave final sign-off [artifact 122]. That's the highest-severity open finding [finding 9]: a checklist claims done, the evidence says pending. If you launch June 10 on the current checklist, you'd be shipping against an unapproved security review. Recommend confirming with the named reviewer before steerco signs off.",
+    cited_claim_ids: [67],
+    cited_artifact_ids: [122],
+    model: "llama-3.3-70b-versatile",
+    input_tokens: 4320,
+    output_tokens: 138,
+    created_at: "2026-05-20T14:08:40Z",
+  },
+];
+
 export function ChatRoom() {
-  const [sessions, setSessions] = useState<SessionSummary[]>([]);
-  const [currentId, setCurrentId] = useState<number | null>(null);
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [sessions, setSessions] = useState<SessionSummary[]>(
+    DEMO_MODE ? DEMO_SESSIONS : [],
+  );
+  const [currentId, setCurrentId] = useState<number | null>(
+    DEMO_MODE ? 1 : null,
+  );
+  const [messages, setMessages] = useState<Message[]>(
+    DEMO_MODE ? DEMO_MESSAGES : [],
+  );
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!DEMO_MODE);
   const scrollerRef = useRef<HTMLDivElement>(null);
 
   // Initial sessions load + auto-open the most recent or create a new one
   useEffect(() => {
+    if (DEMO_MODE) return;
     (async () => {
       try {
         const r = await fetch(`${BROWSER_API_URL}/api/chat/sessions`);
@@ -64,6 +134,7 @@ export function ChatRoom() {
   }, []);
 
   useEffect(() => {
+    if (DEMO_MODE) return;
     if (currentId == null) {
       setMessages([]);
       return;
@@ -113,6 +184,40 @@ export function ChatRoom() {
   async function send(content: string) {
     const text = content.trim();
     if (!text || currentId == null) return;
+
+    // No backend in the static demo — echo the question and a canned note.
+    if (DEMO_MODE) {
+      const now = new Date().toISOString();
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: -Date.now(),
+          role: "user",
+          content: text,
+          cited_claim_ids: [],
+          cited_artifact_ids: [],
+          model: null,
+          input_tokens: null,
+          output_tokens: null,
+          created_at: now,
+        },
+        {
+          id: -Date.now() - 1,
+          role: "assistant",
+          content:
+            "This is a static snapshot of husn.io for demo purposes — the live agent isn't running here. In the full product this answer is generated against the operational graph with grounded citations to claims, artifacts, and findings, exactly like the transcript above.",
+          cited_claim_ids: [],
+          cited_artifact_ids: [],
+          model: "demo",
+          input_tokens: null,
+          output_tokens: null,
+          created_at: now,
+        },
+      ]);
+      setInput("");
+      return;
+    }
+
     setSending(true);
     setError(null);
     // Optimistic user-turn so the textarea clears instantly

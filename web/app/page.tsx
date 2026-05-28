@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 import { ApiHealth } from "@/components/api-health";
 import { BriefsCard } from "@/components/briefs-card";
 import { ClaimsCard } from "@/components/claims-card";
@@ -21,7 +23,7 @@ export default function Home() {
           </p>
         </div>
         <nav className="flex items-center gap-2 text-xs">
-          <a
+          <Link
             href="/chat"
             className="rounded border px-3 py-1.5"
             style={{
@@ -31,14 +33,14 @@ export default function Home() {
             }}
           >
             Ask the AI TPM →
-          </a>
-          <a
+          </Link>
+          <Link
             href="/connections"
             className="rounded border px-3 py-1.5"
             style={{ borderColor: "var(--border)", color: "var(--text)", background: "#1a1f2c" }}
           >
             Connections →
-          </a>
+          </Link>
         </nav>
       </header>
 

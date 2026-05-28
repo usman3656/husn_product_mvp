@@ -1,3 +1,4 @@
+import { FETCH_INIT } from "@/lib/fetch-init";
 const SERVER_API_URL = process.env.API_URL ?? "http://api:8000";
 
 type Counts = {
@@ -28,7 +29,7 @@ type ProjectList = {
 
 async function fetchSummary(): Promise<Summary | null> {
   try {
-    const res = await fetch(`${SERVER_API_URL}/api/graph/summary`, { cache: "no-store" });
+    const res = await fetch(`${SERVER_API_URL}/api/graph/summary`, FETCH_INIT);
     if (!res.ok) return null;
     return (await res.json()) as Summary;
   } catch {
@@ -38,7 +39,7 @@ async function fetchSummary(): Promise<Summary | null> {
 
 async function fetchProjects(): Promise<ProjectList> {
   try {
-    const res = await fetch(`${SERVER_API_URL}/api/graph/projects`, { cache: "no-store" });
+    const res = await fetch(`${SERVER_API_URL}/api/graph/projects`, FETCH_INIT);
     if (!res.ok) return { projects: [] };
     return (await res.json()) as ProjectList;
   } catch {

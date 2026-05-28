@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 
+import { DEMO_MODE } from "@/lib/demo";
+
 const BROWSER_API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 type ConnectionRow = {
@@ -47,8 +49,50 @@ const STATUS_STYLE: Record<string, { bg: string; fg: string }> = {
   "expired-no-refresh": { bg: "#ef444433", fg: "#fca5a5" },
 };
 
+// Baked snapshot for the read-only GitHub Pages build — no backend to query.
+const DEMO_ROWS: ConnectionRow[] = [
+  {
+    id: 1, source: "jira", account_id: "atlas-team.atlassian.net",
+    account_label: "atlas-team.atlassian.net", scopes: "read:jira-work read:jira-user",
+    created_at: "2026-05-01T09:00:00Z", updated_at: "2026-05-23T08:00:00Z",
+    token_expires_at: "2026-05-23T12:00:00Z", token_status: "ok",
+    seconds_until_expiry: 3000, has_refresh_token: true,
+    last_raw_fetched_at: "2026-05-23T07:55:00Z", raw_artifact_count: 214,
+    artifact_count: 214, scope_count: 2,
+  },
+  {
+    id: 2, source: "slack", account_id: "T0ATLAS", account_label: "Atlas Workspace",
+    scopes: "channels:history channels:read users:read",
+    created_at: "2026-05-02T09:00:00Z", updated_at: "2026-05-23T08:00:00Z",
+    token_expires_at: null, token_status: "ok", seconds_until_expiry: null,
+    has_refresh_token: false, last_raw_fetched_at: "2026-05-23T07:58:00Z",
+    raw_artifact_count: 1380, artifact_count: 1380, scope_count: 3,
+  },
+  {
+    id: 3, source: "google", account_id: "tpm@atlas.example",
+    account_label: "tpm@atlas.example", scopes: "gmail.readonly drive.readonly",
+    created_at: "2026-05-05T09:00:00Z", updated_at: "2026-05-23T08:00:00Z",
+    token_expires_at: "2026-05-23T12:30:00Z", token_status: "ok",
+    seconds_until_expiry: 4200, has_refresh_token: true,
+    last_raw_fetched_at: "2026-05-23T07:50:00Z", raw_artifact_count: 642,
+    artifact_count: 642, scope_count: 2,
+  },
+  {
+    id: 4, source: "microsoft", account_id: "tpm@atlas.onmicrosoft.com",
+    account_label: "tpm@atlas.onmicrosoft.com",
+    scopes: "Mail.Read Files.Read.All offline_access",
+    created_at: "2026-05-10T09:00:00Z", updated_at: "2026-05-23T08:00:00Z",
+    token_expires_at: "2026-05-23T12:15:00Z", token_status: "ok",
+    seconds_until_expiry: 3600, has_refresh_token: true,
+    last_raw_fetched_at: "2026-05-23T07:45:00Z", raw_artifact_count: 198,
+    artifact_count: 198, scope_count: 3,
+  },
+];
+
 export function ConnectionsList() {
-  const [items, setItems] = useState<ConnectionRow[] | null>(null);
+  const [items, setItems] = useState<ConnectionRow[] | null>(
+    DEMO_MODE ? DEMO_ROWS : null,
+  );
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<number | null>(null);
 
@@ -65,10 +109,12 @@ export function ConnectionsList() {
   }
 
   useEffect(() => {
+    if (DEMO_MODE) return;
     refresh();
   }, []);
 
   async function disconnect(id: number, label: string) {
+    if (DEMO_MODE) return;
     if (!confirm(`Disconnect ${label}? Historical data is kept but no new syncs will happen.`)) {
       return;
     }
@@ -139,20 +185,22 @@ export function ConnectionsList() {
                 >
                   {c.token_status}
                 </span>
-                <button
-                  onClick={() =>
-                    disconnect(c.id, c.account_label || `${c.source} #${c.id}`)
-                  }
-                  disabled={busy === c.id}
-                  className="rounded border px-3 py-1 text-[11px] font-medium disabled:opacity-50"
-                  style={{
-                    borderColor: "#ef444466",
-                    color: "#fca5a5",
-                    background: "#ef444411",
-                  }}
-                >
-                  {busy === c.id ? "…" : "Disconnect"}
-                </button>
+                {!DEMO_MODE && (
+                  <button
+                    onClick={() =>
+                      disconnect(c.id, c.account_label || `${c.source} #${c.id}`)
+                    }
+                    disabled={busy === c.id}
+                    className="rounded border px-3 py-1 text-[11px] font-medium disabled:opacity-50"
+                    style={{
+                      borderColor: "#ef444466",
+                      color: "#fca5a5",
+                      background: "#ef444411",
+                    }}
+                  >
+                    {busy === c.id ? "…" : "Disconnect"}
+                  </button>
+                )}
               </div>
             </div>
 

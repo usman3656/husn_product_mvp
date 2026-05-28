@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 import { ChatRoom } from "@/components/chat-room";
 
 export const metadata = {
@@ -9,9 +11,9 @@ export default function ChatPage() {
     <main className="mx-auto max-w-6xl px-6 py-8">
       <header className="mb-6 flex items-baseline justify-between">
         <div>
-          <a className="text-xs" style={{ color: "var(--muted)" }} href="/">
+          <Link className="text-xs" style={{ color: "var(--muted)" }} href="/">
             ← Back to dashboard
-          </a>
+          </Link>
           <h1 className="mt-2 text-2xl font-semibold tracking-tight">Ask the AI TPM</h1>
           <p className="text-sm" style={{ color: "var(--muted)" }}>
             Free-form Q&amp;A grounded in your operational graph. Every answer cites

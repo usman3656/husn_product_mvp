@@ -1,3 +1,4 @@
+import { FETCH_INIT } from "@/lib/fetch-init";
 const SERVER_API_URL = process.env.API_URL ?? "http://api:8000";
 
 type Artifact = {
@@ -13,7 +14,7 @@ async function fetchKind(kind: string, limit = 10): Promise<Artifact[]> {
   try {
     const r = await fetch(
       `${SERVER_API_URL}/api/artifacts?source=google&kind=${kind}&limit=${limit}`,
-      { cache: "no-store" },
+      FETCH_INIT,
     );
     if (!r.ok) return [];
     const body = (await r.json()) as { items: Artifact[] };

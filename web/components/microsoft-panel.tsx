@@ -1,3 +1,5 @@
+import { FETCH_INIT } from "@/lib/fetch-init";
+import { DEMO_MODE } from "@/lib/demo";
 import { DisconnectButton } from "@/components/disconnect-button";
 import { MicrosoftAllowlist } from "@/components/microsoft-allowlist";
 import { MicrosoftFeed } from "@/components/microsoft-feed";
@@ -19,9 +21,7 @@ type MicrosoftStatus = { connections: MicrosoftConnection[] };
 
 async function fetchStatus(): Promise<MicrosoftStatus> {
   try {
-    const res = await fetch(`${SERVER_API_URL}/auth/microsoft/status`, {
-      cache: "no-store",
-    });
+    const res = await fetch(`${SERVER_API_URL}/auth/microsoft/status`, FETCH_INIT);
     if (!res.ok) return { connections: [] };
     return (await res.json()) as MicrosoftStatus;
   } catch {
@@ -76,15 +76,17 @@ export async function MicrosoftPanel() {
       ) : (
         <>
           <MicrosoftFeed />
-          <details className="mt-4">
-            <summary
-              className="cursor-pointer text-[11px] underline"
-              style={{ color: "var(--muted)" }}
-            >
-              Edit allowlist (Outlook folders + OneDrive folders)
-            </summary>
-            <MicrosoftAllowlist />
-          </details>
+          {!DEMO_MODE && (
+            <details className="mt-4">
+              <summary
+                className="cursor-pointer text-[11px] underline"
+                style={{ color: "var(--muted)" }}
+              >
+                Edit allowlist (Outlook folders + OneDrive folders)
+              </summary>
+              <MicrosoftAllowlist />
+            </details>
+          )}
         </>
       )}
     </div>

@@ -1,3 +1,4 @@
+import { FETCH_INIT } from "@/lib/fetch-init";
 const SERVER_API_URL = process.env.API_URL ?? "http://api:8000";
 
 type FindingsSummary = {
@@ -43,7 +44,7 @@ type Finding = {
 
 async function fetchSummary(): Promise<FindingsSummary | null> {
   try {
-    const res = await fetch(`${SERVER_API_URL}/api/findings/summary`, { cache: "no-store" });
+    const res = await fetch(`${SERVER_API_URL}/api/findings/summary`, FETCH_INIT);
     if (!res.ok) return null;
     return (await res.json()) as FindingsSummary;
   } catch {
@@ -53,9 +54,7 @@ async function fetchSummary(): Promise<FindingsSummary | null> {
 
 async function fetchFindings(): Promise<Finding[]> {
   try {
-    const res = await fetch(`${SERVER_API_URL}/api/findings?status=open&limit=20`, {
-      cache: "no-store",
-    });
+    const res = await fetch(`${SERVER_API_URL}/api/findings?status=open&limit=20`, FETCH_INIT);
     if (!res.ok) return [];
     const body = (await res.json()) as { items: Finding[] };
     return body.items;

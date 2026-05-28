@@ -1,3 +1,5 @@
+import { FETCH_INIT } from "@/lib/fetch-init";
+import { DEMO_MODE } from "@/lib/demo";
 import { DisconnectButton } from "@/components/disconnect-button";
 import { GoogleAllowlist } from "@/components/google-allowlist";
 import { GoogleFeed } from "@/components/google-feed";
@@ -19,7 +21,7 @@ type GoogleStatus = { connections: GoogleConnection[] };
 
 async function fetchStatus(): Promise<GoogleStatus> {
   try {
-    const res = await fetch(`${SERVER_API_URL}/auth/google/status`, { cache: "no-store" });
+    const res = await fetch(`${SERVER_API_URL}/auth/google/status`, FETCH_INIT);
     if (!res.ok) return { connections: [] };
     return (await res.json()) as GoogleStatus;
   } catch {
@@ -72,15 +74,17 @@ export async function GooglePanel() {
       ) : (
         <>
           <GoogleFeed />
-          <details className="mt-4">
-            <summary
-              className="cursor-pointer text-[11px] underline"
-              style={{ color: "var(--muted)" }}
-            >
-              Edit allowlist (labels + folders)
-            </summary>
-            <GoogleAllowlist />
-          </details>
+          {!DEMO_MODE && (
+            <details className="mt-4">
+              <summary
+                className="cursor-pointer text-[11px] underline"
+                style={{ color: "var(--muted)" }}
+              >
+                Edit allowlist (labels + folders)
+              </summary>
+              <GoogleAllowlist />
+            </details>
+          )}
         </>
       )}
     </div>
