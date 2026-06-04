@@ -21,7 +21,7 @@ settings = get_settings()
 
 
 async def startup(ctx: dict) -> None:
-    configure_logging(settings.log_level)
+    configure_logging(settings.log_level, settings.log_format)
     log.info("husn.worker.startup")
 
 

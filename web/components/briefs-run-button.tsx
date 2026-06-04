@@ -2,19 +2,11 @@
 
 import { useState } from "react";
 
-import { DEMO_MODE } from "@/lib/demo";
-import { Pill } from "@/components/ui";
-
 const BROWSER_API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 export function RunButtonClient({ inProgress }: { inProgress: boolean }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-
-  // No backend in the static demo: show a calm "snapshot" pill, no controls.
-  if (DEMO_MODE) {
-    return <Pill tone="neutral">Snapshot</Pill>;
-  }
 
   async function trigger() {
     setBusy(true);

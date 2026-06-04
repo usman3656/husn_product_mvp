@@ -30,7 +30,7 @@ async def start() -> RedirectResponse:
         raise HTTPException(500, "JIRA_CLIENT_ID / JIRA_CLIENT_SECRET not configured")
     state = make_state(source="jira")
     url = build_authorize_url(
-        client_id=s.jira_client_id, redirect_uri=s.jira_redirect_uri, state=state
+        client_id=s.jira_client_id, redirect_uri=s.jira_redirect_uri_resolved, state=state
     )
     return RedirectResponse(url, status_code=302)
 
@@ -59,7 +59,7 @@ async def callback(
             code=code,
             client_id=s.jira_client_id,
             client_secret=s.jira_client_secret,
-            redirect_uri=s.jira_redirect_uri,
+            redirect_uri=s.jira_redirect_uri_resolved,
         )
     except Exception as e:  # pragma: no cover  (httpx raises during real OAuth only)
         log.exception("husn.jira.oauth.exchange_failed")
@@ -137,7 +137,7 @@ async def callback(
             f"<h1>Jira connected</h1>"
             f"<p>{len(upserted)} site(s) authorized; backfill queued.</p>"
             f"<ul>{sites_html}</ul>"
-            f'<p><a href="http://localhost:3000">Back to dashboard</a> (refresh in ~30s to see issues)</p>'
+            f'<p><a href="{s.public_web_base_url}">Back to dashboard</a> (refresh in ~30s to see issues)</p>'
         )
     )
 

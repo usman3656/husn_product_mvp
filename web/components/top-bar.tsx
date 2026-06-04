@@ -11,7 +11,7 @@ export function TopBar() {
       }}
     >
       <div className="mx-auto flex max-w-6xl items-center justify-between px-5 py-3 sm:px-6">
-        <Link href="/" className="flex items-baseline gap-1.5" aria-label="husn.ai home">
+        <Link href="/" className="flex items-baseline gap-1.5" aria-label="husn.io home">
           <span className="text-[17px] font-semibold tracking-tight">husn</span>
           <span className="text-[17px] font-semibold tracking-tight" style={{ color: "var(--accent)" }}>
             .ai

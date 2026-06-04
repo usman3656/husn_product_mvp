@@ -25,7 +25,7 @@ async def start() -> RedirectResponse:
         raise HTTPException(500, "SLACK_CLIENT_ID / SLACK_CLIENT_SECRET not configured")
     state = make_state(source="slack")
     url = build_authorize_url(
-        client_id=s.slack_client_id, redirect_uri=s.slack_redirect_uri, state=state
+        client_id=s.slack_client_id, redirect_uri=s.slack_redirect_uri_resolved, state=state
     )
     return RedirectResponse(url, status_code=302)
 
@@ -53,7 +53,7 @@ async def callback(
             code=code,
             client_id=s.slack_client_id,
             client_secret=s.slack_client_secret,
-            redirect_uri=s.slack_redirect_uri,
+            redirect_uri=s.slack_redirect_uri_resolved,
         )
     except Exception as e:
         log.exception("husn.slack.oauth.exchange_failed")
@@ -111,7 +111,7 @@ async def callback(
             f"<h1>Slack connected</h1>"
             f"<p>Workspace: <strong>{team_name}</strong> <code>(team {team_id})</code></p>"
             f"<p>Backfill queued.</p>"
-            f'<p><a href="http://localhost:3000">Back to dashboard</a> (refresh in ~30s)</p>'
+            f'<p><a href="{s.public_web_base_url}">Back to dashboard</a> (refresh in ~30s)</p>'
         )
     )
 

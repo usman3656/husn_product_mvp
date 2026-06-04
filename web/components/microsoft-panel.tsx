@@ -1,6 +1,5 @@
 import { CardHeader, EmptyState, Pill, Tile } from "@/components/ui";
 import { FETCH_INIT } from "@/lib/fetch-init";
-import { DEMO_MODE } from "@/lib/demo";
 import { DisconnectButton } from "@/components/disconnect-button";
 import { MicrosoftAllowlist } from "@/components/microsoft-allowlist";
 import { MicrosoftFeed } from "@/components/microsoft-feed";
@@ -76,14 +75,12 @@ export async function MicrosoftPanel() {
       ) : (
         <>
           <MicrosoftFeed />
-          {!DEMO_MODE && (
-            <details className="mt-4">
-              <summary className="cursor-pointer text-[12px]" style={{ color: "var(--accent-ink)" }}>
-                Edit what we watch (Outlook and OneDrive folders)
-              </summary>
-              <MicrosoftAllowlist />
-            </details>
-          )}
+          <details className="mt-4">
+            <summary className="cursor-pointer text-[12px]" style={{ color: "var(--accent-ink)" }}>
+              Edit what we watch (Outlook and OneDrive folders)
+            </summary>
+            <MicrosoftAllowlist />
+          </details>
         </>
       )}
     </Tile>

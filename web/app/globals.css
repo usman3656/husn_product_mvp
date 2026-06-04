@@ -3,7 +3,7 @@
 @tailwind utilities;
 
 /* ---------------------------------------------------------------------------
-   husn.ai design system: calm, Apple-light. Color = meaning only.
+   husn.io design system: calm, Apple-light. Color = meaning only.
    Light tokens here; full dark set behind prefers-color-scheme: dark below.
 --------------------------------------------------------------------------- */
 :root {

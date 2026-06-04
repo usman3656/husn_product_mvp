@@ -29,7 +29,7 @@ from husn.routers import (
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
-    configure_logging(settings.log_level)
+    configure_logging(settings.log_level, settings.log_format)
     log.info("husn.api.startup", env=settings.env)
     yield
     log.info("husn.api.shutdown")
@@ -37,9 +37,12 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="husn.io API", version="0.0.1", lifespan=lifespan)
 
+# CORS origins come from CORS_ALLOWED_ORIGINS (comma-separated). Default covers
+# local-dev; prod sets https://app.husn.io,https://husn.io.
+_settings = get_settings()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=_settings.cors_origins_list(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

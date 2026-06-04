@@ -30,7 +30,7 @@ async def start() -> RedirectResponse:
     url = build_authorize_url(
         tenant=s.ms_tenant,
         client_id=s.ms_client_id,
-        redirect_uri=s.ms_redirect_uri,
+        redirect_uri=s.ms_redirect_uri_resolved,
         state=state,
     )
     return RedirectResponse(url, status_code=302)
@@ -66,7 +66,7 @@ async def callback(
             code=code,
             client_id=s.ms_client_id,
             client_secret=s.ms_client_secret,
-            redirect_uri=s.ms_redirect_uri,
+            redirect_uri=s.ms_redirect_uri_resolved,
         )
     except Exception as e:  # pragma: no cover  (httpx raises during real OAuth only)
         log.exception("husn.microsoft.oauth.exchange_failed")
@@ -134,7 +134,7 @@ async def callback(
             f"<h1>Microsoft connected</h1>"
             f"<p>Authorized account: <strong>{upn or display_name}</strong></p>"
             f"<p><strong>Next step:</strong> pick which Outlook folders + OneDrive folders "
-            f'to ingest on the <a href="http://localhost:3000">dashboard</a> (Microsoft panel).</p>'
+            f'to ingest on the <a href="{s.public_web_base_url}">dashboard</a> (Microsoft panel).</p>'
             f"<p>Nothing is ingested until you select an allowlist.</p>"
         )
     )

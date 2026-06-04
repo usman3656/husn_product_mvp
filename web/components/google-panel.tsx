@@ -1,6 +1,5 @@
 import { CardHeader, EmptyState, Pill, Tile } from "@/components/ui";
 import { FETCH_INIT } from "@/lib/fetch-init";
-import { DEMO_MODE } from "@/lib/demo";
 import { DisconnectButton } from "@/components/disconnect-button";
 import { GoogleAllowlist } from "@/components/google-allowlist";
 import { GoogleFeed } from "@/components/google-feed";
@@ -76,14 +75,12 @@ export async function GooglePanel() {
       ) : (
         <>
           <GoogleFeed />
-          {!DEMO_MODE && (
-            <details className="mt-4">
-              <summary className="cursor-pointer text-[12px]" style={{ color: "var(--accent-ink)" }}>
-                Edit what we watch (labels and folders)
-              </summary>
-              <GoogleAllowlist />
-            </details>
-          )}
+          <details className="mt-4">
+            <summary className="cursor-pointer text-[12px]" style={{ color: "var(--accent-ink)" }}>
+              Edit what we watch (labels and folders)
+            </summary>
+            <GoogleAllowlist />
+          </details>
         </>
       )}
     </Tile>

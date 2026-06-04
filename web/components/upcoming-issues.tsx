@@ -2,8 +2,6 @@
 
 import { useEffect, useState } from "react";
 
-import { DEMO_MODE } from "@/lib/demo";
-
 type Upcoming = {
   id: string;
   title: string;
@@ -11,31 +9,6 @@ type Upcoming = {
   tone: "warning" | "danger" | "neutral";
   when: string;
 };
-
-// Forecasted Project Atlas items for the read-only snapshot.
-const DEMO_UPCOMING: Upcoming[] = [
-  {
-    id: "u1",
-    title: "Regression suite finishes June 8",
-    detail: "Only 2 days of buffer before the June 10 launch.",
-    tone: "warning",
-    when: "in ~10 days",
-  },
-  {
-    id: "u2",
-    title: "Security re-scan still pending sign-off",
-    detail: "The reviewer asked for a re-scan after the May 15 auth change and has not signed off.",
-    tone: "danger",
-    when: "blocking",
-  },
-  {
-    id: "u3",
-    title: "Finance still planning against June 3",
-    detail: "Budget and headcount dates trail the current June 10 target.",
-    tone: "warning",
-    when: "needs a nudge",
-  },
-];
 
 const TONE: Record<Upcoming["tone"], { dot: string; ink: string; soft: string; line: string }> = {
   warning: { dot: "var(--warning)", ink: "var(--warning-ink)", soft: "var(--warning-soft)", line: "var(--warning-line)" },
@@ -50,13 +23,8 @@ const TONE: Record<Upcoming["tone"], { dot: string; ink: string; soft: string; l
  */
 export function UpcomingIssues() {
   const [open, setOpen] = useState(false);
-  const [items, setItems] = useState<Upcoming[]>(DEMO_MODE ? DEMO_UPCOMING : []);
-
-  // Outside demo there is no forecast endpoint wired yet; show empty state.
-  useEffect(() => {
-    if (DEMO_MODE) return;
-    setItems([]);
-  }, []);
+  // Forecast endpoint not wired yet — render the empty state for now.
+  const [items] = useState<Upcoming[]>([]);
 
   // Close on Escape when expanded.
   useEffect(() => {

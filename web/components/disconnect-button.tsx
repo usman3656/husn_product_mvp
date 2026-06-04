@@ -2,8 +2,6 @@
 
 import { useState } from "react";
 
-import { DEMO_MODE } from "@/lib/demo";
-
 const BROWSER_API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 export function DisconnectButton({
@@ -15,9 +13,6 @@ export function DisconnectButton({
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  // No backend in the static demo (disconnect would 404). Hide it.
-  if (DEMO_MODE) return null;
 
   async function go() {
     if (

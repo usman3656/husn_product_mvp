@@ -50,6 +50,10 @@ class Connection(Base):
     source: Mapped[str] = mapped_column(String(32), nullable=False)
     account_id: Mapped[str] = mapped_column(String(128), nullable=False)
     account_label: Mapped[str | None] = mapped_column(String(256))
+    # PROD-AUDIT: envelope-encrypt connection tokens before customer 1
+    # (access_token + refresh_token are currently plaintext at rest; Bawani
+    # to add an encrypted bytea column + KMS-backed DEK in a follow-up
+    # Alembic migration. Single-tenant Hetzner deploy is acceptable risk.)
     access_token: Mapped[str] = mapped_column(Text, nullable=False)
     refresh_token: Mapped[str | None] = mapped_column(Text)
     token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

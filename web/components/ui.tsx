@@ -1,7 +1,7 @@
 import * as React from "react";
 
 /* ---------------------------------------------------------------------------
-   husn.ai presentational UI kit. No client state here, no UI libraries.
+   husn.io presentational UI kit. No client state here, no UI libraries.
    Everything reads CSS-variable tokens so light/dark + theme stay consistent.
 --------------------------------------------------------------------------- */
 

@@ -1,7 +1,7 @@
 import { ChatRoom } from "@/components/chat-room";
 
 export const metadata = {
-  title: "Ask Husn · husn.ai",
+  title: "Ask Husn · husn.io",
 };
 
 export default function ChatPage() {

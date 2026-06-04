@@ -28,7 +28,7 @@ async def start() -> RedirectResponse:
         raise HTTPException(500, "GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET not configured")
     state = make_state(source="google")
     url = build_authorize_url(
-        client_id=s.google_client_id, redirect_uri=s.google_redirect_uri, state=state
+        client_id=s.google_client_id, redirect_uri=s.google_redirect_uri_resolved, state=state
     )
     return RedirectResponse(url, status_code=302)
 
@@ -61,7 +61,7 @@ async def callback(
             code=code,
             client_id=s.google_client_id,
             client_secret=s.google_client_secret,
-            redirect_uri=s.google_redirect_uri,
+            redirect_uri=s.google_redirect_uri_resolved,
         )
     except Exception as e:
         log.exception("husn.google.oauth.exchange_failed")
@@ -136,7 +136,7 @@ async def callback(
             f"<h1>Google connected</h1>"
             f"<p>Authorized account: <strong>{email}</strong></p>"
             f"<p><strong>Next step:</strong> pick which Gmail labels + Drive folders to ingest "
-            f'on the <a href="http://localhost:3000">dashboard</a> (Google panel).</p>'
+            f'on the <a href="{s.public_web_base_url}">dashboard</a> (Google panel).</p>'
             f"<p>Nothing is ingested until you select an allowlist.</p>"
         )
     )

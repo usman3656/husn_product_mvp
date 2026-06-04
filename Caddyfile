@@ -1,0 +1,92 @@
+# Production Caddyfile for husn.io.
+# Bind-mounted into the caddy container at /etc/caddy/Caddyfile.
+# Three sites: app (Next.js SSR), api (FastAPI), apex/www (redirect to app).
+# Env vars come from .env.prod via docker-compose.prod.yml.
+
+{
+	email {$ACME_EMAIL}
+	log {
+		output stdout
+		format json
+		level INFO
+	}
+	servers {
+		trusted_proxies static private_ranges
+	}
+}
+
+# ---------- Shared security headers ----------
+(security_headers) {
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		# Report-only for now so we don't break SSE / inline styles / OAuth popups.
+		Content-Security-Policy-Report-Only "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://{$DOMAIN_API}; frame-ancestors 'none'"
+		-Server
+	}
+}
+
+# ---------- app.husn.io : Next.js SSR ----------
+{$DOMAIN_APP} {
+	import security_headers
+
+	encode zstd gzip
+
+	log {
+		output stdout
+		format json
+	}
+
+	reverse_proxy web:3000 {
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+		header_up X-Forwarded-Host {host}
+		flush_interval -1
+		transport http {
+			read_timeout 5m
+			write_timeout 5m
+		}
+	}
+}
+
+# ---------- api.husn.io : FastAPI ----------
+{$DOMAIN_API} {
+	import security_headers
+
+	encode zstd gzip
+
+	log {
+		output stdout
+		format json
+	}
+
+	# OAuth callbacks must never be cached by any intermediary.
+	@oauth_callback path_regexp ^/auth/[^/]+/callback
+	header @oauth_callback Cache-Control "no-store"
+	header @oauth_callback Pragma "no-cache"
+
+	reverse_proxy api:8000 {
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+		header_up X-Forwarded-Host {host}
+		flush_interval -1
+		transport http {
+			read_timeout 5m
+			write_timeout 5m
+		}
+	}
+}
+
+# ---------- husn.io + www.husn.io : 301 redirect to app ----------
+{$DOMAIN_ROOT}, www.{$DOMAIN_ROOT} {
+	log {
+		output stdout
+		format json
+	}
+	redir https://{$DOMAIN_APP}{uri} 301
+}

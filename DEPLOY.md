@@ -1,0 +1,174 @@
+# husn.io — Production Deploy Plan
+
+Working reference for shipping the live app at `https://husn.io`. Scope is the
+**basic running deploy first**, billing and tenancy come in follow-up waves.
+
+Last updated: 2026-06-04
+
+---
+
+## Wave 0 — Basic running app (THIS DEPLOY)
+
+Single-tenant app live at the real domain, all four connectors working against
+production OAuth callbacks, real Postgres + Redis persisting, syncing in real
+time. No billing, no tenant signup, no formal auth yet. Treat the live URL as
+private (Caddy basic-auth or IP allowlist while wave 1 is in flight).
+
+What ships:
+- Hetzner CX32 (4 vCPU, 8 GB, ~€11/mo) running `docker compose` behind Caddy
+  with auto Let's Encrypt
+- `app.husn.io` (Next.js SSR, port 3000) and `api.husn.io` (FastAPI, port 8000)
+- Postgres + Redis on named volumes, internal-network only
+- `ENVIRONMENT=production`, `LOG_FORMAT=json`, `PUBLIC_API_BASE_URL=https://api.husn.io`
+- OAuth callbacks for Jira / Slack / Google / Microsoft updated to the
+  production callback URL pattern: `https://api.husn.io/auth/<provider>/callback`
+- The static GitHub Pages demo is torn down (Wave 0 includes deleting
+  `gh-pages`, `scripts/deploy-pages.sh`, the `DEMO_MODE` plumbing, the
+  baked demo data, and the static-export gating in `next.config.mjs`)
+
+Order of execution (each line is one focused commit where reasonable):
+1. Save this plan (`DEPLOY.md`)
+2. Revert `web/next.config.mjs` to plain SSR
+3. Strip `DEMO_MODE` plumbing + baked demo data
+4. Rebrand `husn.ai` → `husn.io` in the UI / metadata
+5. Delete `scripts/deploy-pages.sh`
+6. Write `Caddyfile`, `docker-compose.prod.yml`, `.env.prod.example`
+7. Write `scripts/deploy.sh` (pull, migrate, up)
+8. Production-readiness audit on the API (background agent)
+9. OAuth provider callback updates (founder, console-only)
+10. Provision Hetzner CX32, DNS, run `scripts/deploy.sh`
+11. Delete `gh-pages` branch from the remote, disable GitHub Pages in repo
+    settings
+12. Smoke test all four connectors end-to-end against the production domain
+
+---
+
+## Wave 1 — First paying customer (≈4-5 weeks of focused work)
+
+Everything required to charge customer 1. Order matters; each unblocks the next.
+
+1. **Tenancy + RLS migration.** Add `tenants` + `users` + invites. RLS policies
+   keyed on `tenant_id` (already a column). Middleware sets
+   `SET LOCAL app.tenant_id` per request and per Arq job.
+2. **Auth.** Auth.js v5 with Resend magic links + Google SSO. WorkOS/SAML is
+   deferred until an enterprise asks.
+3. **Tenant signup + onboarding wizard** (connect the four sources, name the
+   first project, pick an allowlist).
+4. **Stripe Checkout + portal + webhook.** One usage-metered line item
+   (editor seats). Webhook sets `tenants.plan`.
+5. **Step 5 v2 agent rewrite.** Deterministic skeleton → renderer (Groq Llama
+   3.3 70B) → NLI verifier → deterministic-template fallback. The v1
+   single-call path stays as a smoke fixture.
+6. **TOS / Privacy / Subprocessor pages.** Required by Google OAuth consent
+   screen, by every B2B MSA, and by Microsoft tenant admin consent. Lawyer
+   review.
+7. **`/admin/erase` endpoint** for GDPR Art 17.
+8. **`audit_events` table** + per-action audit writes.
+9. **Token encryption at rest** on `connections.tokens` (AES-GCM with a
+   `TOKEN_ENCRYPTION_KEY` from env).
+10. **Per-workspace Slack install manifest pattern** (the customer applies the
+    manifest in their own workspace, not a centralised SaaS install — this is
+    the Slack ToS posture we already committed to in `knowledge.md` §6).
+11. **Sentry + Better Stack** (errors + uptime + logs). Free tiers fit the
+    first ~10 customers.
+12. **CI/CD.** GitHub Actions → GHCR → ssh-deploy to the box,
+    `docker compose pull && up -d --no-deps`, then `alembic upgrade head`.
+13. **Secrets management.** `sops + age` with an encrypted `.env.prod` in
+    repo; one age key per operator.
+
+While Wave 1 is being built, **Google OAuth verification + CASA Tier 2** runs in
+the background (longest pole, 6–8 weeks). First pilot customers are added as
+Google OAuth test users (100-cap waiver) during this window.
+
+---
+
+## Wave 2 — Scale to ~100 customers
+
+- Hetzner managed Postgres (~€20/mo) when restore drills get scary (≈customer 10)
+- EU Hetzner node + per-tenant region routing when the first EU customer signs
+- WorkOS SSO at the first enterprise ask (~$125/connection/mo)
+- Full file-type coverage (.pptx, PDF, full-sheet content)
+- Step 6 feedback loop (clarifications + Track A/B) and Step 7 Tier 0 alias
+  dictionary
+- SOC 2 Type II ramp on Drata (around customer 25, ~6 months)
+
+---
+
+## Hosting
+
+Hetzner CX32 in Falkenstein (or Ashburn if US customers first).
+4 vCPU / 8 GB RAM / 80 GB NVMe / 20 TB traffic / Ubuntu 24.04. ~€11/mo.
+
+Containers run via `docker compose -f docker-compose.prod.yml up -d`:
+- `caddy` (reverse proxy, auto SSL)
+- `web` (Next.js SSR)
+- `api` (FastAPI)
+- `worker` (Arq)
+- `postgres` (named volume, internal network only)
+- `redis` (named volume, internal network only)
+
+Memory limits: api 1G, worker 1G, web 1G, postgres 2G, redis 256M, caddy 256M.
+
+## DNS & SSL
+
+- Cloudflare DNS, **grey-cloud** (DNS only) for `app.husn.io` and `api.husn.io`
+  (SSE + auth round-trips). Orange-cloud (proxied) is fine for the apex marketing
+  page when it exists.
+- A records for `app`, `api`, `husn.io` apex → the Hetzner box IP.
+- Caddy auto-provisions Let's Encrypt certs on container start. Two named
+  volumes (`caddy_data`, `caddy_config`) so they persist.
+
+## Decisions locked in
+
+- Hosting: Hetzner CX32 + docker compose + Caddy
+- Pilot path for Google: test-user waiver while CASA verification runs
+- LLM for Step 5 v2 renderer: Groq Llama 3.3 70B (NLI verifier is non-negotiable
+  because Groq hallucinates citations under strict-skeleton rules more than
+  Sonnet; Sonnet stays on the table if reject rates are bad)
+
+## Total cost (rough, monthly)
+
+| Item                         | At launch | At 100 customers          |
+| ---------------------------- | --------- | ------------------------- |
+| Hetzner CX32                 | €11       | €35 (+ storage + R2)      |
+| Postgres                     | $0        | €25 (managed, at ≈c10)    |
+| Resend                       | $0        | $20                       |
+| Sentry                       | $0        | $26                       |
+| Better Stack                 | $0        | $25                       |
+| Auth.js                      | $0        | $0                        |
+| Cloudflare DNS               | $0        | $0                        |
+| GHCR + GH Actions            | $0        | $0                        |
+| LLM (briefs)                 | low       | ~$300/tenant target       |
+| **Infra ex-LLM**             | **~$15**  | **~$140**                 |
+
+LLM dominates everything else; the rest is rounding.
+
+---
+
+## What is intentionally NOT in Wave 0
+
+These belong to Wave 1 or later, do not block the basic running app:
+
+- Tenant signup, RLS migration, real auth (Auth.js + Resend + Google SSO)
+- Stripe billing
+- Step 5 v2 agent rewrite (v1 stays in place)
+- TOS / Privacy / Subprocessor pages (placeholder pages are enough for Wave 0)
+- `/admin/erase` endpoint
+- `audit_events` table
+- Token-at-rest encryption on `connections.tokens` (TODO comment is enough for
+  Wave 0; the basic deploy uses one set of dev OAuth clients owned by the
+  founder)
+- SOC 2, WorkOS SAML, multi-region, full file-type coverage, Tier 1/2 learning
+
+## Compliance posture (read knowledge.md §6 for the full reasoning)
+
+- MSA must include: no training on customer data, sub-processor list (Anthropic
+  ZDR, Hetzner, Cloudflare R2, Resend, Sentry, Better Stack), and the explicit
+  "output cannot be used as input to performance / disciplinary decisions"
+  clause that defers EU AI Act Annex III classification.
+- DPA required even for US customers (their EU employees → GDPR).
+- GDPR Art 17 procedure: documented `/admin/erase` endpoint (Wave 1).
+- Slack ToS: per-workspace install, not centralised SaaS pull.
+- The "CC'd shadow inbox" pattern is dead, do not resurface it in marketing.
+- Deal-breaker to watch: German pilots trigger Betriebsvereinbarung (works
+  council, 2-6 months) — politely defer for 2026.

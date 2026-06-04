@@ -5,7 +5,7 @@ import { TopBar } from "@/components/top-bar";
 import { UpcomingIssues } from "@/components/upcoming-issues";
 
 export const metadata: Metadata = {
-  title: "husn.ai",
+  title: "husn.io",
   description: "The alignment layer for program teams.",
 };
 

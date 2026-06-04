@@ -1,7 +1,7 @@
 import { ConnectionsList } from "@/components/connections-list";
 
 export const metadata = {
-  title: "Connections · husn.ai",
+  title: "Connections · husn.io",
 };
 
 export default function ConnectionsPage() {
