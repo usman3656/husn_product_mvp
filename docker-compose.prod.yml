@@ -38,7 +38,6 @@ services:
     environment:
       DOMAIN_APP: ${DOMAIN_APP}
       DOMAIN_API: ${DOMAIN_API}
-      DOMAIN_ROOT: ${DOMAIN_ROOT}
       ACME_EMAIL: ${ACME_EMAIL}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro

@@ -82,11 +82,5 @@
 	}
 }
 
-# ---------- husn.io + www.husn.io : 301 redirect to app ----------
-{$DOMAIN_ROOT}, www.{$DOMAIN_ROOT} {
-	log {
-		output stdout
-		format json
-	}
-	redir https://{$DOMAIN_APP}{uri} 301
-}
+# Apex husn.io + www.husn.io are intentionally NOT served here.
+# They keep pointing at the existing marketing site at the registrar.
