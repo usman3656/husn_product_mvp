@@ -141,8 +141,12 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    # No healthcheck: python:3.12-slim has no pgrep, and nothing depends on
-    # the worker being healthy. The restart policy handles recovery.
+    # Worker shares the api image, which has a HEALTHCHECK that curls
+    # /health/lite on port 8000. The worker doesn't run uvicorn, so override
+    # to disable. Nothing depends_on the worker being healthy; restart policy
+    # handles recovery.
+    healthcheck:
+      disable: true
     deploy:
       resources:
         limits:
