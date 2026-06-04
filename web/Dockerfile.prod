@@ -1,0 +1,33 @@
+# web/Dockerfile.prod
+# Production image for the Next.js SSR app. Builds once at image-build time
+# so `next start` boots instantly inside the container. The dev image
+# (web/Dockerfile) is unchanged and still does `next dev` with mount-based
+# hot reload.
+
+FROM node:20-alpine AS builder
+WORKDIR /app
+ENV NEXT_TELEMETRY_DISABLED=1
+
+# Install deps. `package-lock.json*` makes the lockfile optional (use npm ci
+# if present, npm install otherwise).
+COPY package.json package-lock.json* ./
+RUN npm install
+
+# Copy the rest of the source and build.
+COPY . .
+RUN npm run build
+
+# ---------- runtime ----------
+FROM node:20-alpine AS runner
+WORKDIR /app
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+
+# Bring over just what's needed at runtime.
+COPY --from=builder /app/package.json ./
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/.next ./.next
+COPY --from=builder /app/next.config.mjs ./
+
+EXPOSE 3000
+CMD ["npm", "start"]
