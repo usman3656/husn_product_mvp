@@ -75,9 +75,9 @@ services:
       api:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3000/"]
-      interval: 30s
-      timeout: 10s
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/healthz"]
+      interval: 15s
+      timeout: 5s
       retries: 5
       start_period: 30s
     deploy:
@@ -141,12 +141,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    healthcheck:
-      test: ["CMD", "pgrep", "-f", "arq"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 15s
+    # No healthcheck: python:3.12-slim has no pgrep, and nothing depends on
+    # the worker being healthy. The restart policy handles recovery.
     deploy:
       resources:
         limits:
