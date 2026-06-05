@@ -35,10 +35,12 @@ Host *
     ConnectTimeout 10
 
 # husn.io production box on Hetzner.
+# IdentityFile is intentionally omitted: ssh will try every key under
+# ~/.ssh/id_* (ed25519, rsa, ecdsa) plus anything loaded into ssh-agent.
+# That way the alias works regardless of how the user named their key.
 Host husn
     HostName 178.105.157.152
     User root
-    IdentityFile ~/.ssh/id_ed25519
 EOF
 
 chmod 600 "$CFG"

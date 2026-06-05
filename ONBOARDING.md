@@ -1,17 +1,19 @@
 # Husn — Onboarding
 
-You're going to work on the same codebase, with access to the same production
-server (Hetzner CX32, behind `app.husn.io` / `api.husn.io`). You don't need to
-stand anything new up — just get your laptop wired to it.
+You're working on the same codebase, against the same production server
+(Hetzner CX32 behind `app.husn.io` / `api.husn.io`). Nothing new to stand up —
+just get your laptop wired in.
 
-## What you need from the team before starting
+## What you need first
 
-1. **Push access to the GitHub repo** (or your fork pointed at the same `main`).
-2. **The `.env.prod` file**, sent over 1Password / Bitwarden — not Slack/email.
-   Drop it at the repo root and `chmod 600 .env.prod`. You only need this if
-   you'll run prod locally; for day-to-day you don't open it.
-3. **The SSH key** the server accepts (or have someone add yours to
-   `/root/.ssh/authorized_keys`).
+1. **GitHub access.** Either push access to `usman3656/husn_product_mvp`, or
+   fork it and clone your fork. Either works — `main` is what auto-deploys.
+2. **Your SSH pubkey added to the server.** Send your `~/.ssh/id_*.pub` (the
+   `.pub` one — never the private key) to whoever holds root on the box, and
+   they'll append it to `/root/.ssh/authorized_keys`.
+3. **(Optional) `.env.prod`** — only if you'll run the full prod stack on your
+   own machine. Get it from 1Password / Bitwarden, not chat. For day-to-day
+   coding you don't need it.
 
 ## 1 — Clone
 
@@ -20,60 +22,72 @@ git clone https://github.com/usman3656/husn_product_mvp.git husn
 cd husn
 ```
 
-## 2 — Wire up SSH to the production box
+(Or `git clone https://github.com/<your-fork>/husn_product_mvp.git husn` if
+you forked.)
 
-One command from your Mac:
+## 2 — Wire up SSH to the production box
 
 ```bash
 bash scripts/init-mac-ssh.sh
 ```
 
 That writes `~/.ssh/config` with a `husn` Host alias pointing at the live
-server. Test it:
+server. It does **not** pin a specific private key — ssh will try every
+`~/.ssh/id_*` you have. Test it:
 
 ```bash
-ssh husn        # drops you into a root shell on the prod box
+ssh husn
 ```
 
-## 3 — Install the deploy wrapper (optional but nice)
+You should land in a root shell on the prod box. If you get
+`Permission denied (publickey)`, your pubkey hasn't been added to the server
+yet — go back to "What you need first" step 2.
+
+## 3 — Install the deploy wrapper (recommended)
 
 ```bash
 bash scripts/init-mac-deploy.sh
+# open a NEW terminal window after this (so PATH picks up ~/.local/bin)
+husn-deploy
 ```
 
-Adds `husn-deploy` to your `PATH`. Running it from anywhere does
-`git pull && deploy.sh` on the server.
+`husn-deploy` runs `git pull && deploy.sh` on the server and drops you into an
+interactive shell on the box. Use it whenever you want to force a redeploy
+without waiting on the auto-deploy cron.
 
-## 4 — That's it. Day-to-day:
+## 4 — Day-to-day
 
 ```bash
-# Make code changes locally, push to main
-git add <files> && git commit -m "..." && git push origin main
-
-# Auto-deploy cron picks it up within ~2 minutes.
-# If you want to force-redeploy:
-husn-deploy
-
-# Or jump on the box:
-ssh husn
-cd ~/husn
-./scripts/deploy.sh        # rebuild + redeploy
-./scripts/diag.sh          # one-shot diagnostic dump
-docker compose -f docker-compose.prod.yml --env-file .env.prod logs -f api    # tail any service
+# code, then:
+git add <files>
+git commit -m "what changed"
+git push origin main
+# auto-deploy on the server picks it up within ~2 minutes
 ```
 
-## 5 — Want to iterate locally too? (optional)
+To force-redeploy, debug, or peek at logs:
+
+```bash
+husn-deploy                                              # one-shot redeploy
+ssh husn                                                 # interactive shell
+ssh husn 'cd ~/husn && ./scripts/diag.sh'                # diagnostic dump
+ssh husn 'cd ~/husn && docker compose -f docker-compose.prod.yml \
+  --env-file .env.prod logs -f api'                      # tail any service
+```
+
+## 5 — Local dev (optional)
 
 ```bash
 cp .env.example .env
-# put your own GROQ_API_KEY / ANTHROPIC_API_KEY in .env — don't use prod keys
+# put your own GROQ_API_KEY / ANTHROPIC_API_KEY in .env (not prod keys)
 docker compose up --build
 ```
 
 - App: <http://localhost:3000>
 - API: <http://localhost:8000/health>
 
-That's all. There is no separate setup for you — the server, DNS, certs,
-secrets, and OAuth callbacks are already configured.
+## That's the whole loop.
 
-For the deeper context: `README.md`, `DEPLOY.md`, `PROGRESS.md`, `plan.md`.
+The server, DNS, certs, OAuth callbacks, secrets, auto-deploy cron — all
+already configured. You don't change any of them. If something is broken,
+read `DEPLOY.md` / `PROGRESS.md`; for context, `README.md` / `plan.md`.
