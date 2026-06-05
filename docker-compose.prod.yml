@@ -141,6 +141,13 @@ services:
       REDIS_URL: redis://redis:6379/0
     command: ["arq", "husn.workers.WorkerSettings"]
     networks:
+      # `edge` (a regular bridge network) is required for outbound DNS +
+      # HTTPS — the worker has to reach api.groq.com (LLM), Jira / Slack
+      # / Google / Microsoft Graph (connectors), and Atlassian OAuth
+      # refresh. The `internal` network (internal: true) blocks all
+      # outbound egress, so the worker without edge dies with
+      # "Temporary failure in name resolution" on every external call.
+      - edge
       - internal
     depends_on:
       postgres:
