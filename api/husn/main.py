@@ -8,6 +8,7 @@ from husn.core.logging import configure_logging, log
 from husn.routers import (
     agent,
     artifacts,
+    atlassian_personal_data,
     auth_google,
     auth_jira,
     auth_microsoft,
@@ -65,3 +66,4 @@ app.include_router(claims.router)
 app.include_router(findings.router)
 app.include_router(agent.router)
 app.include_router(chat.router)
+app.include_router(atlassian_personal_data.router)
