@@ -39,11 +39,24 @@ echo "Cron installed: */2 * * * * $AUTO"
 touch "$LOG"
 chmod 640 "$LOG"
 
-# 3. Server-side `redeploy` alias so you can manually redeploy from inside
-# ~/husn without typing the full path. Goes into /root/.bashrc.
-if ! grep -q '^alias redeploy=' /root/.bashrc 2>/dev/null; then
-  echo "alias redeploy='cd ~/husn && git pull && ./scripts/deploy.sh'" >> /root/.bashrc
-  echo "Alias 'redeploy' added to /root/.bashrc (open a new shell to use it)."
+# 3. Server-side `redeploy` command. A real script in /usr/local/bin/ rather
+# than a shell alias — aliases only work in interactive shells and not when
+# ssh-run remotely. This works everywhere, from any cwd, in any session.
+cat > /usr/local/bin/redeploy <<'EOF'
+#!/usr/bin/env bash
+# Manual redeploy of husn.io from the production box.
+set -euo pipefail
+cd "$(eval echo ~"${SUDO_USER:-$USER}")/husn"
+git pull
+./scripts/deploy.sh
+EOF
+chmod +x /usr/local/bin/redeploy
+echo "Wrote /usr/local/bin/redeploy (usable from any shell, any cwd)."
+
+# Clean up any prior alias attempt in /root/.bashrc so it doesn't shadow the script.
+if [[ -f /root/.bashrc ]] && grep -q '^alias redeploy=' /root/.bashrc; then
+  sed -i '/^alias redeploy=/d' /root/.bashrc
+  echo "Removed stale 'alias redeploy=' from /root/.bashrc."
 fi
 
 echo
