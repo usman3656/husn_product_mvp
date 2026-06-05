@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from husn.core.config import get_settings
 from husn.core.logging import configure_logging, log
 from husn.routers import (
+    admin_diag,
     agent,
     artifacts,
     atlassian_personal_data,
@@ -67,3 +68,4 @@ app.include_router(findings.router)
 app.include_router(agent.router)
 app.include_router(chat.router)
 app.include_router(atlassian_personal_data.router)
+app.include_router(admin_diag.router)
