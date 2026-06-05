@@ -1,7 +1,7 @@
 from arq import cron
 from arq.connections import RedisSettings
 
-from husn.agent.run import run_agent_for_all_projects
+from husn.agent.run_v2 import run_renderer_for_all_projects
 from husn.claims.extract import extract_pending as claims_extract_pending
 from husn.connectors.google.backfill import backfill_connection as google_backfill_connection
 from husn.connectors.google.backfill import get_connections as google_get_connections
@@ -116,7 +116,7 @@ async def run_agent(ctx: dict) -> dict:
     first cron tick within ~5 min will pick it up.
     """
     async with SessionLocal() as session:
-        return await run_agent_for_all_projects(session, trigger="cron")
+        return await run_renderer_for_all_projects(session, trigger="cron")
 
 
 # Cron schedules — drift-tolerant offsets so the jobs don't pile up.

@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from husn.agent.run import run_agent_for_project
+from husn.agent.run_v2 import run_renderer_for_project
 from husn.core.config import get_settings
 from husn.db.models import AgentRun, Brief, Project
 from husn.db.session import get_session
@@ -84,7 +84,7 @@ async def trigger_run(
         if first is None:
             raise HTTPException(400, "no projects defined")
         project_id = first.id
-    result = await run_agent_for_project(session, project_id=project_id, trigger="manual")
+    result = await run_renderer_for_project(session, project_id=project_id, trigger="manual")
     return result
 
 
