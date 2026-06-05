@@ -8,6 +8,14 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
 
+# NEXT_PUBLIC_* env vars are inlined into the client bundle at build time.
+# Runtime env on the container cannot reach client-side code, so these must
+# be present here. Pass them in via docker-compose `build.args` or
+# `docker build --build-arg`. Without these the browser code falls back to
+# its default (localhost:8000) and every fetch fails.
+ARG NEXT_PUBLIC_API_URL
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+
 # Install deps. `package-lock.json*` makes the lockfile optional (use npm ci
 # if present, npm install otherwise).
 COPY package.json package-lock.json* ./
