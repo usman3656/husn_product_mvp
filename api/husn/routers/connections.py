@@ -112,3 +112,93 @@ async def disconnect(
     await session.commit()
     log.info("husn.connections.disconnect", source=conn.source, account_id=conn.account_id)
     return {"removed": True, "source": conn.source, "account_id": conn.account_id}
+
+
+# ---------- Sync cursor reset ------------------------------------------------
+#
+# Cursors live on `connection.extra` as a JSONB dict. Per source the keys are:
+#   google     -> gmail_history_id, drive_start_page_token, drive_changes_page_token
+#   microsoft  -> drive_deltas (dict), outlook_deltas (dict), drive_delta_link (legacy)
+#   jira       -> (none; full-scan each tick)
+#   slack      -> (none; full-scan each tick)
+#
+# After disconnect + reconnect the new Connection row may inherit an
+# extra blob from the auth-callback merge logic; or it may be fresh but the
+# code's delta-mode branch still returns no items because the provider's
+# delta link from the old token chain doesn't surface anything new on the
+# fresh token. Cheapest fix: blow away the cursor keys; next backfill tick
+# falls into the full-listing branch and re-pulls everything.
+
+_CURSOR_KEYS_TO_DROP = {
+    # google
+    "gmail_history_id",
+    "drive_start_page_token",
+    "drive_changes_page_token",
+    # microsoft
+    "drive_deltas",
+    "outlook_deltas",
+    "drive_delta_link",
+}
+
+
+def _drop_cursor_keys(extra: dict[str, Any] | None) -> tuple[dict[str, Any], list[str]]:
+    extra = dict(extra or {})
+    dropped: list[str] = []
+    for key in list(extra.keys()):
+        if key in _CURSOR_KEYS_TO_DROP:
+            dropped.append(key)
+            extra.pop(key, None)
+    return extra, dropped
+
+
+@router.post("/{connection_id}/reset-sync")
+async def reset_sync(
+    connection_id: int, session: AsyncSession = Depends(get_session)
+) -> dict[str, Any]:
+    """Drop delta cursors / history tokens so the next backfill is full-scan.
+
+    Idempotent. Does not touch tokens, allowlist, or historical artifacts.
+    Use when a fresh re-auth left a sync stuck in delta-mode-with-no-changes,
+    or after the founder forces a recovery from a known-good state.
+    """
+    conn = await session.get(Connection, connection_id)
+    if not conn:
+        raise HTTPException(404, f"connection {connection_id} not found")
+    new_extra, dropped = _drop_cursor_keys(conn.extra)
+    conn.extra = new_extra
+    await session.commit()
+    log.info(
+        "husn.connections.reset_sync",
+        source=conn.source,
+        account_id=conn.account_id,
+        connection_id=conn.id,
+        dropped=dropped,
+    )
+    return {
+        "reset": True,
+        "source": conn.source,
+        "connection_id": conn.id,
+        "dropped_keys": dropped,
+    }
+
+
+@router.post("/reset-sync-all")
+async def reset_sync_all(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+    """Bulk: clear cursors on every connection. Same semantics as the
+    per-connection endpoint, applied to all rows in one transaction.
+    """
+    conns = (await session.execute(select(Connection))).scalars().all()
+    summary: list[dict[str, Any]] = []
+    for c in conns:
+        new_extra, dropped = _drop_cursor_keys(c.extra)
+        c.extra = new_extra
+        summary.append(
+            {
+                "connection_id": c.id,
+                "source": c.source,
+                "dropped_keys": dropped,
+            }
+        )
+    await session.commit()
+    log.info("husn.connections.reset_sync_all", connections=len(conns))
+    return {"reset": True, "count": len(conns), "items": summary}
