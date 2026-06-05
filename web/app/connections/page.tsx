@@ -1,21 +1,23 @@
 import { ConnectionsList } from "@/components/connections-list";
 
 export const metadata = {
-  title: "Connections · husn.io",
+  title: "Connections · Husn",
 };
 
 export default function ConnectionsPage() {
   return (
-    <main className="mx-auto max-w-4xl px-5 py-8 sm:px-6">
-      <header className="mb-8 husn-rise">
-        <h1 className="text-[28px] font-semibold tracking-tight">Connections</h1>
-        <p className="mt-1 max-w-2xl text-[14px]" style={{ color: "var(--muted)" }}>
-          The tools we watch, their status, and when we last synced. Disconnecting stops
-          new syncs; your past data is kept.
+    <main className="mx-auto px-6 lg:px-10 pt-12 pb-24" style={{ maxWidth: "var(--reading-w)" }}>
+      <header className="husn-rise">
+        <p className="husn-eyebrow">Workspace · Plumbing</p>
+        <h1 className="husn-title mt-4">Connections</h1>
+        <p className="husn-prose mt-4 max-w-[60ch]">
+          The tools Husn reads from. This is the plumbing — the interesting work
+          happens on the briefing. Disconnecting stops new syncs; past data is kept.
         </p>
       </header>
-
-      <ConnectionsList />
+      <div className="mt-10">
+        <ConnectionsList />
+      </div>
     </main>
   );
 }
