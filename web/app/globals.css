@@ -217,6 +217,11 @@ h1, h2, h3, h4 { color: var(--text); letter-spacing: -0.022em; font-weight: 600;
 /* Hairline rule used in editorial layouts */
 .husn-rule { border-color: var(--rule); }
 
+/* Native <details> as an inline collapse — no client JS needed.
+   Hide the default disclosure triangle so the summary chip stands on its own. */
+details > summary { list-style: none; cursor: pointer; }
+details > summary::-webkit-details-marker { display: none; }
+
 /* Numerals: tabular for figures, proportional for headlines */
 .tabular { font-variant-numeric: tabular-nums; }
 

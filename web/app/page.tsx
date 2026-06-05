@@ -99,13 +99,41 @@ function entryKind(rule_id: string): string {
   return "Concern";
 }
 
-/* Prose-style narration of a finding. The backend's `summary` is short and
- * factual; we wrap it with a frame that reads like a chief-of-staff line. */
+/* "owner/reporter" -> "Reporter". "status/delivery_status" -> "Delivery status".
+ * "deadline" -> "Deadline". Keeps the title short and readable. */
+function prettyKey(key?: string | null): string {
+  if (!key) return "this";
+  const last = key.split("/").pop() || key;
+  return last
+    .replace(/_/g, " ")
+    .replace(/\bdate\b/i, "date")
+    .replace(/^./, (c) => c.toUpperCase());
+}
+
+/* A short, editorial title. The backend's `summary` is factually correct but
+ * dumps every distinct value into the string; we derive something a human
+ * would actually write. */
+function cleanTitle(f: Finding): string {
+  const key = prettyKey(f.details?.key);
+  if (f.rule_id === "R-DATE-1") return `${key} conflict`;
+  if (f.rule_id === "R-STATUS-1") return `${key} drift`;
+  if (f.rule_id === "R-OWNER-1") return `${key} unclear`;
+  if (f.rule_id.startsWith("AGENT-FINDING-")) {
+    return f.summary.split(":")[0].split(" (")[0].trim() || "Pattern flagged";
+  }
+  return f.summary.split(":")[0].split(" (")[0].trim() || "Concern";
+}
+
+/* One-sentence under-title. Doesn't repeat the title — just locates the
+ * disagreement. */
 function narration(f: Finding): string {
   const sources = Object.keys(f.details?.per_source ?? {});
-  const sourceList = sources.map((s) => SOURCE_LABEL[s] ?? s).join(" and ");
-  const where = sources.length >= 2 ? ` Two sources disagree — ${sourceList}.` : "";
-  return f.summary + where;
+  if (sources.length === 0) return "Opened just now — evidence is being attached.";
+  if (sources.length >= 2) {
+    const list = sources.map((s) => SOURCE_LABEL[s] ?? s).join(" and ");
+    return `Two sources disagree — ${list}.`;
+  }
+  return `Surfaced from ${SOURCE_LABEL[sources[0]] ?? sources[0]}.`;
 }
 
 function todayHeadline(date = new Date()): string {
@@ -140,7 +168,7 @@ export default async function Briefing() {
           {todayHeadline()} · Updated {timeAgo(status?.last_run_at ?? null)}
         </p>
         <h1 className="husn-display mt-4">
-          {greeting(count)}
+          Today&apos;s brief.
         </h1>
         <p className="husn-prose mt-5 max-w-[60ch]">
           {leadIn(count)}
@@ -197,25 +225,14 @@ export default async function Briefing() {
 
 /* ---------- Pieces ---------- */
 
-function greeting(count: number): string {
-  if (count === 0) return "The week looks unobstructed.";
-  if (count === 1) return "One thing deserves your attention.";
-  if (count <= 3) return `${spelled(count)} things deserve your attention.`;
-  return `${spelled(count)} things deserve your attention. The most consequential is below.`;
-}
-
 function leadIn(count: number): string {
   if (count === 0) {
-    return "No conflicts, no ownership gaps, no status drift across your tools right now. Husn keeps watching — you'll see a note here the moment something needs you.";
+    return "Nothing is drifting across your tools right now. Husn is still reading — you'll see something here the moment that changes.";
   }
   if (count === 1) {
-    return "Husn read across your tools and found one signal worth raising. Evidence is attached. You can resolve it from here.";
+    return "One concern is open. It's below, with the evidence to verify it and the actions to move it.";
   }
-  return "Ranked by consequence — not recency. Each item is sourced from your tools, with evidence you can verify in a glance.";
-}
-
-function spelled(n: number): string {
-  return ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"][n] ?? String(n);
+  return `${count} concerns are open. Ranked by impact, not recency. The most consequential is below.`;
 }
 
 function TopConcern({ f }: { f: Finding }) {
@@ -237,15 +254,17 @@ function TopConcern({ f }: { f: Finding }) {
       </div>
 
       <h2 className="husn-title mt-6" style={{ fontSize: 36, lineHeight: 1.15, maxWidth: "26ch" }}>
-        {f.summary}
+        {cleanTitle(f)}
       </h2>
 
       <p className="husn-prose mt-5 max-w-[62ch]">
         {longNarration(f)}
       </p>
 
+      <ValueList values={f.details?.distinct_values ?? []} />
+
       {sources.length > 0 ? (
-        <div className="mt-7 flex flex-wrap items-center gap-2">
+        <div className="mt-6 flex flex-wrap items-center gap-2">
           {sources.flatMap((src) =>
             (f.details?.per_source[src] ?? []).slice(0, 2).map((ev, i) => (
               <EvidenceChip
@@ -284,20 +303,73 @@ function longNarration(f: Finding): string {
   const sources = Object.keys(f.details?.per_source ?? {});
   const distinct = f.details?.distinct_values ?? [];
   const opened = timeAgo(f.opened_at);
+  const sourceList = sources.map((s) => SOURCE_LABEL[s] ?? s).join(" and ");
 
-  if (f.rule_id === "R-DATE-1" && distinct.length >= 2 && sources.length >= 2) {
-    return `${SOURCE_LABEL[sources[0]] ?? sources[0]} commits to ${distinct[0]}. ${SOURCE_LABEL[sources[1]] ?? sources[1]} cites ${distinct[1]}. No one has reconciled the difference since this was opened ${opened}.`;
+  if (f.rule_id === "R-DATE-1") {
+    if (distinct.length >= 2 && sources.length >= 2) {
+      return `${SOURCE_LABEL[sources[0]] ?? sources[0]} commits to ${distinct[0]}; ${SOURCE_LABEL[sources[1]] ?? sources[1]} cites ${distinct[1]}. Untouched since ${opened}.`;
+    }
+    return `${distinct.length} candidate dates across ${sourceList}. Opened ${opened}.`;
   }
-  if (f.rule_id === "R-STATUS-1" && distinct.length >= 2 && sources.length >= 2) {
-    return `${SOURCE_LABEL[sources[0]] ?? sources[0]} reports "${distinct[0]}". ${SOURCE_LABEL[sources[1]] ?? sources[1]} reports "${distinct[1]}". Last reconciled ${opened}.`;
+  if (f.rule_id === "R-STATUS-1") {
+    if (distinct.length >= 2 && sources.length >= 2) {
+      return `${SOURCE_LABEL[sources[0]] ?? sources[0]} reports "${distinct[0]}"; ${SOURCE_LABEL[sources[1]] ?? sources[1]} reports "${distinct[1]}". Last reconciled ${opened}.`;
+    }
+    return `Status reads differently across ${sourceList}. Opened ${opened}.`;
   }
   if (f.rule_id === "R-OWNER-1") {
-    return `Ownership has not been confirmed since this was opened ${opened}. Decisions made downstream are riding on an assumption that may not hold.`;
+    return `${distinct.length || "Several"} possible owners across ${sourceList || "the team"}. Opened ${opened}. Decisions downstream are riding on an unconfirmed assumption.`;
   }
   if (f.rule_id.startsWith("AGENT-FINDING-")) {
-    return `A pattern in the activity over the last few days suggests something is being missed. Husn surfaced this ${opened}; the evidence is collected below.`;
+    return `Husn flagged a pattern ${opened}. Evidence is collected below.`;
   }
-  return `Opened ${opened}. The evidence is collected below — verify, then resolve.`;
+  return `Opened ${opened}. Evidence is below — verify, then resolve.`;
+}
+
+/* Shows the first N distinct values, then a "+ K more" chip backed by native
+ * <details> — expands inline with no client JS. */
+function ValueList({
+  values,
+  max = 2,
+  compact = false,
+}: {
+  values: string[];
+  max?: number;
+  compact?: boolean;
+}) {
+  if (!values || values.length === 0) return null;
+  const head = values.slice(0, max);
+  const rest = values.slice(max);
+  const sizeCls = compact ? "text-[13px] mt-3" : "text-[14px] mt-5";
+
+  return (
+    <div className={`${sizeCls} flex flex-wrap items-center gap-x-2 gap-y-1`}>
+      <span className="tabular" style={{ color: "var(--text-2)" }}>
+        {head.join(", ")}
+      </span>
+      {rest.length > 0 ? (
+        <details>
+          <summary
+            className="inline-flex items-center rounded-full border px-2 py-0.5 text-[11.5px] font-medium select-none"
+            style={{
+              borderColor: "var(--border)",
+              background: "var(--panel-2)",
+              color: "var(--muted)",
+            }}
+            title={rest.join(", ")}
+          >
+            and {rest.length} more
+          </summary>
+          <span
+            className="ml-2 tabular"
+            style={{ color: "var(--text-2)" }}
+          >
+            , {rest.join(", ")}
+          </span>
+        </details>
+      ) : null}
+    </div>
+  );
 }
 
 function SeverityMark({ severity }: { severity: Finding["severity"] }) {
@@ -349,11 +421,12 @@ function EntryRow({ f, index }: { f: Finding; index: number }) {
             className="husn-heading mt-2.5"
             style={{ color: "var(--text)", fontSize: 18 }}
           >
-            {f.summary}
+            {cleanTitle(f)}
           </h3>
           <p className="mt-2 text-[14px] leading-relaxed" style={{ color: "var(--text-2)", maxWidth: "60ch" }}>
             {narration(f)}
           </p>
+          <ValueList values={f.details?.distinct_values ?? []} compact />
           {sources.length > 0 ? (
             <div className="mt-3 flex flex-wrap items-center gap-1.5">
               {sources.slice(0, 4).map((src) => (
