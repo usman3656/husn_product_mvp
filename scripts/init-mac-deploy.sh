@@ -21,9 +21,23 @@ mkdir -p "$BIN_DIR"
 # 1. Write the wrapper script.
 cat > "$WRAPPER" <<'EOF'
 #!/usr/bin/env bash
-# One-shot redeploy of husn.io. Runs over SSH to the production box.
+# One-shot redeploy of husn.io.
+# Runs over SSH to the production box: git pull + deploy, then leaves you
+# in an interactive shell inside ~/husn so you can keep working (or just
+# `exit` to come back to your Mac).
+#
+# Usage:
+#   husn-deploy          # pull + deploy, then drop into ~/husn shell
+#   husn-deploy --quit   # pull + deploy, then disconnect (no shell)
 set -euo pipefail
-ssh husn 'cd ~/husn && git pull && ./scripts/deploy.sh'
+if [[ "${1:-}" == "--quit" ]]; then
+  ssh husn 'cd ~/husn && git pull && ./scripts/deploy.sh'
+else
+  # -t forces a pseudo-TTY so the interactive shell at the end works.
+  # `;` (not &&) keeps the shell open even if the deploy fails — useful
+  # for debugging in place.
+  ssh -t husn 'cd ~/husn && git pull && ./scripts/deploy.sh ; cd ~/husn && exec bash -l'
+fi
 EOF
 chmod +x "$WRAPPER"
 echo "Wrote $WRAPPER"
