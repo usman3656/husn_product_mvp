@@ -14,9 +14,15 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from husn.claims.base import Extractor
+from husn.claims.extractors.commitment import SlackCommitmentExtractor
 from husn.claims.extractors.date import JiraDateExtractor, SlackDateExtractor
 from husn.claims.extractors.decision import SlackDecisionExtractor
+from husn.claims.extractors.dependency import (
+    JiraDependencyExtractor,
+    SlackDependencyExtractor,
+)
 from husn.claims.extractors.owner import JiraOwnerExtractor, SlackAuthorExtractor
+from husn.claims.extractors.scope import SlackScopeExtractor
 from husn.claims.extractors.status import JiraStatusExtractor, SlackStatusExtractor
 from husn.claims.upsert import upsert_claim
 from husn.core.logging import log
@@ -29,10 +35,14 @@ _ALL_EXTRACTORS: list[Extractor] = [
     JiraOwnerExtractor(),
     JiraStatusExtractor(),
     JiraDateExtractor(),
+    JiraDependencyExtractor(),
     SlackAuthorExtractor(),
     SlackStatusExtractor(),
     SlackDateExtractor(),
     SlackDecisionExtractor(),
+    SlackScopeExtractor(),
+    SlackDependencyExtractor(),
+    SlackCommitmentExtractor(),
 ]
 
 
