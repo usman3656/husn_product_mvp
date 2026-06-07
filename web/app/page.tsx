@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { Pulse as PulseStrip, type PulseDatum } from "@/components/pulse";
 import { ReachOutButton, type ReachOutContext } from "@/components/reach-out";
 import { FETCH_INIT } from "@/lib/fetch-init";
 
@@ -263,7 +264,7 @@ export default async function Briefing() {
       {/* 1. Organizational Pulse */}
       <section className="mt-14 husn-rise" style={{ animationDelay: "40ms" }}>
         <SectionLabel kicker="01" title="Organizational Pulse" />
-        <Pulse confidence={conf} alignment={alig} momentum={mom} risks={risks.length} />
+        <PulseStrip data={pulseData(findings, conf, alig, mom, risks)} />
       </section>
 
       {/* 2. Most Consequential Issue */}
@@ -352,36 +353,115 @@ function metricTone(v: number): SemanticTone {
 }
 
 /* =====================================================
-   1. Pulse — the living vitals strip.
+   1. Pulse — driven by the client `<PulseStrip>` for
+   animation + interactivity. This helper builds its
+   data props from the existing findings.
    ===================================================== */
 
-function Pulse({
-  confidence: conf,
-  alignment: alig,
-  momentum: mom,
-  risks,
-}: {
-  confidence: number;
-  alignment: number;
-  momentum: { label: string; tone: SemanticTone };
-  risks: number;
-}) {
-  return (
-    <div
-      className="grid grid-cols-2 lg:grid-cols-4 gap-px overflow-hidden rounded-[var(--radius-lg)] border"
-      style={{ background: "var(--rule)", borderColor: "var(--border)" }}
-    >
-      <PulseRing label="Confidence" value={conf} tone={metricTone(conf)} suffix="%" caption={confidenceCaption(conf)} />
-      <PulseRing label="Alignment" value={alig} tone={metricTone(alig)} suffix="%" caption={alignmentCaption(alig)} />
-      <PulseText label="Momentum" value={mom.label} tone={mom.tone} caption={momentumCaption(mom.label)} />
-      <PulseText
-        label="Emerging Risks"
-        value={risks === 0 ? "None" : `${risks} active`}
-        tone={risks === 0 ? "aligned" : risks <= 2 ? "uncertain" : "conflict"}
-        caption={risks === 0 ? "Nothing new in the last 48 hours." : "Surfaced in the last 48 hours."}
-      />
-    </div>
-  );
+function dailyBuckets(findings: Finding[], days = 7): number[] {
+  const buckets = new Array(days).fill(0);
+  const dayMs = 86400 * 1000;
+  const start = Date.now() - (days - 1) * dayMs;
+  for (const f of findings) {
+    const t = Date.parse(f.opened_at);
+    if (!Number.isFinite(t)) continue;
+    const idx = Math.floor((t - start) / dayMs);
+    if (idx >= 0 && idx < days) buckets[idx] += 1;
+  }
+  return buckets;
+}
+
+function inverseSeries(counts: number[]): number[] {
+  const max = Math.max(...counts, 1);
+  return counts.map((c) => 1 - c / max);
+}
+
+function pulseData(
+  findings: Finding[],
+  conf: number,
+  alig: number,
+  mom: { label: string; tone: SemanticTone },
+  risks: Finding[],
+): PulseDatum[] {
+  const allBuckets = dailyBuckets(findings);
+  const driftBuckets = dailyBuckets(findings.filter((f) => f.rule_id === "R-DATE-1" || f.rule_id === "R-STATUS-1"));
+  const riskBuckets = dailyBuckets(risks);
+
+  // Severity composition for the breakdown drawer
+  const high = findings.filter((f) => f.severity === "high").length;
+  const medium = findings.filter((f) => f.severity === "medium").length;
+  const low = findings.filter((f) => f.severity === "low").length;
+
+  return [
+    {
+      key: "confidence",
+      label: "Confidence",
+      kind: "ring",
+      value: conf,
+      tone: metricTone(conf),
+      caption: confidenceCaption(conf),
+      series: inverseSeries(allBuckets),
+      href: "/explore?lens=risks",
+      breakdown: [
+        { label: "High-severity concerns", value: `${high}` },
+        { label: "Medium-severity", value: `${medium}` },
+        { label: "Low-severity / informational", value: `${low}` },
+        { label: "Trend (last 7 days)", value: trendLabel(allBuckets) },
+      ],
+    },
+    {
+      key: "alignment",
+      label: "Alignment",
+      kind: "ring",
+      value: alig,
+      tone: metricTone(alig),
+      caption: alignmentCaption(alig),
+      series: inverseSeries(driftBuckets),
+      href: "/explore?lens=risks",
+      breakdown: [
+        { label: "Date conflicts open", value: `${findings.filter((f) => f.rule_id === "R-DATE-1").length}` },
+        { label: "Status drift open", value: `${findings.filter((f) => f.rule_id === "R-STATUS-1").length}` },
+        { label: "Ownership unclear", value: `${findings.filter((f) => f.rule_id === "R-OWNER-1").length}` },
+        { label: "Trend (last 7 days)", value: trendLabel(driftBuckets) },
+      ],
+    },
+    {
+      key: "momentum",
+      label: "Momentum",
+      kind: "text",
+      value: mom.label,
+      tone: mom.tone,
+      caption: momentumCaption(mom.label),
+      href: "/organization",
+      breakdown: [
+        { label: "Reading cadence", value: mom.label },
+        { label: "Last refresh", value: mom.label === "quiet" ? "more than a day ago" : "within the hour" },
+      ],
+    },
+    {
+      key: "risks",
+      label: "Emerging Risks",
+      kind: "text",
+      value: risks.length === 0 ? "None" : `${risks.length} active`,
+      tone: risks.length === 0 ? "aligned" : risks.length <= 2 ? "uncertain" : "conflict",
+      caption: risks.length === 0 ? "Nothing new in the last 48 hours." : "Surfaced in the last 48 hours.",
+      series: inverseSeries(riskBuckets).map((v) => 1 - v),
+      href: "/explore?lens=risks",
+      breakdown: risks.slice(0, 4).map((f) => ({
+        label: entryKind(f.rule_id),
+        value: cleanTitle(f),
+      })),
+    },
+  ];
+}
+
+function trendLabel(buckets: number[]): string {
+  if (buckets.length < 2) return "—";
+  const a = buckets.slice(0, Math.floor(buckets.length / 2)).reduce((x, y) => x + y, 0);
+  const b = buckets.slice(Math.floor(buckets.length / 2)).reduce((x, y) => x + y, 0);
+  if (b > a + 1) return "rising";
+  if (a > b + 1) return "easing";
+  return "steady";
 }
 
 function confidenceCaption(v: number): string {
@@ -404,66 +484,6 @@ function momentumCaption(label: string): string {
   return "Husn is still building a baseline.";
 }
 
-function PulseRing({ label, value, tone, suffix, caption }: { label: string; value: number; tone: SemanticTone; suffix?: string; caption: string }) {
-  const c = toneColor(tone);
-  const r = 26;
-  const C = 2 * Math.PI * r;
-  const offset = C * (1 - Math.max(0, Math.min(100, value)) / 100);
-  return (
-    <div className="p-6" style={{ background: "var(--panel)" }}>
-      <p className="husn-eyebrow" style={{ fontSize: 10.5 }}>{label}</p>
-      <div className="mt-4 flex items-center gap-5">
-        <div className="relative shrink-0" style={{ width: 64, height: 64 }}>
-          <svg width="64" height="64" viewBox="0 0 64 64">
-            <circle cx="32" cy="32" r={r} fill="none" stroke="var(--panel-2)" strokeWidth="6" />
-            <circle
-              cx="32"
-              cy="32"
-              r={r}
-              fill="none"
-              stroke={c.fill}
-              strokeWidth="6"
-              strokeLinecap="round"
-              strokeDasharray={C}
-              strokeDashoffset={offset}
-              transform="rotate(-90 32 32)"
-              style={{ transition: "stroke-dashoffset 600ms ease" }}
-            />
-          </svg>
-          <span
-            aria-hidden
-            className="husn-pulse absolute inset-0 m-auto rounded-full"
-            style={{ width: 8, height: 8, background: c.fill, top: 28, left: 28 }}
-          />
-        </div>
-        <div className="min-w-0">
-          <p className="tabular" style={{ fontSize: 32, lineHeight: 1, letterSpacing: "-0.02em", fontWeight: 600, color: c.fill }}>
-            {value}{suffix ?? ""}
-          </p>
-          <p className="mt-2 text-[12.5px] leading-snug" style={{ color: "var(--text-2)", maxWidth: "20ch" }}>{caption}</p>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function PulseText({ label, value, tone, caption }: { label: string; value: string; tone: SemanticTone; caption: string }) {
-  const c = toneColor(tone);
-  return (
-    <div className="p-6" style={{ background: "var(--panel)" }}>
-      <p className="husn-eyebrow" style={{ fontSize: 10.5 }}>{label}</p>
-      <div className="mt-4 flex items-center gap-5">
-        <span aria-hidden className="husn-pulse inline-block rounded-full shrink-0" style={{ width: 14, height: 14, background: c.fill, boxShadow: `0 0 0 6px ${c.soft}` }} />
-        <div className="min-w-0">
-          <p className="tabular" style={{ fontSize: 24, lineHeight: 1.1, letterSpacing: "-0.018em", fontWeight: 600, color: c.fill }}>
-            {value}
-          </p>
-          <p className="mt-2 text-[12.5px] leading-snug" style={{ color: "var(--text-2)", maxWidth: "22ch" }}>{caption}</p>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 /* =====================================================
    2. Most Consequential Issue — the dominating hero block.

@@ -7,8 +7,8 @@ expired refresh token, or see "last sync N minutes ago" per source.
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import delete, func, select
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import delete, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from husn.core.logging import log
@@ -179,6 +179,88 @@ async def reset_sync(
         "source": conn.source,
         "connection_id": conn.id,
         "dropped_keys": dropped,
+    }
+
+
+@router.get("/{connection_id}/files")
+async def list_connection_files(
+    connection_id: int,
+    limit: int = Query(80, ge=1, le=500),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Files (RawArtifacts) read from this connection's source, with read
+    status per file.
+
+    Read status:
+      * "read"     — raw record + normalized Artifact both present
+      * "fetched"  — raw record present, not yet normalized
+      * (we never persist a row for a fetch that failed, so "failed" is
+        not a status the API can report — connector logs are the source
+        of truth for fetch failures.)
+
+    Returns most-recent first, capped at `limit`.
+    """
+    conn = await session.get(Connection, connection_id)
+    if not conn:
+        raise HTTPException(404, f"connection {connection_id} not found")
+
+    stmt = (
+        select(
+            RawArtifact.id,
+            RawArtifact.kind,
+            RawArtifact.external_id,
+            RawArtifact.fetched_at,
+            Artifact.id.label("artifact_id"),
+            Artifact.title,
+            Artifact.url,
+            Artifact.normalized_at,
+            Artifact.status,
+        )
+        .select_from(RawArtifact)
+        .outerjoin(Artifact, Artifact.raw_artifact_id == RawArtifact.id)
+        .where(RawArtifact.source == conn.source)
+        .order_by(desc(RawArtifact.fetched_at))
+        .limit(limit)
+    )
+    rows = (await session.execute(stmt)).all()
+
+    total_raw = (
+        await session.execute(
+            select(func.count(RawArtifact.id)).where(RawArtifact.source == conn.source)
+        )
+    ).scalar_one()
+    total_artifacts = (
+        await session.execute(
+            select(func.count(Artifact.id)).where(Artifact.source == conn.source)
+        )
+    ).scalar_one()
+
+    items = [
+        {
+            "raw_id": r.id,
+            "kind": r.kind,
+            "external_id": r.external_id,
+            "title": r.title or r.external_id,
+            "url": r.url,
+            "fetched_at": r.fetched_at.isoformat() if r.fetched_at else None,
+            "normalized_at": r.normalized_at.isoformat() if r.normalized_at else None,
+            "status_label": "read" if r.artifact_id is not None else "fetched",
+            "source_status": r.status,
+        }
+        for r in rows
+    ]
+
+    return {
+        "connection_id": conn.id,
+        "source": conn.source,
+        "account_label": conn.account_label,
+        "totals": {
+            "fetched": total_raw,
+            "read": total_artifacts,
+            "pending": max(0, total_raw - total_artifacts),
+        },
+        "items": items,
+        "showing": len(items),
     }
 
 

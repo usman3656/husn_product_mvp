@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
+import { ThemeToggle } from "@/components/theme-toggle";
+
 type NavItem = { href: string; label: string; icon: React.ReactNode; shortcut?: string };
 
 /* Hairline glyphs. Calm, monoline. No emoji. No colored icons. */
@@ -153,9 +155,12 @@ export function SideNav() {
         className="border-t px-4 py-3"
         style={{ borderColor: "var(--rule)" }}
       >
-        <p className="text-[11.5px]" style={{ color: "var(--muted)" }}>
-          The intelligence layer for your organization.
-        </p>
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-[11.5px]" style={{ color: "var(--muted)" }}>
+            The intelligence layer.
+          </p>
+          <ThemeToggle />
+        </div>
       </div>
     </aside>
   );

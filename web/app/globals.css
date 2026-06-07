@@ -97,8 +97,69 @@
   --content-w: 1080px;
 }
 
+/* ===== Dark tokens =====
+   Applied when:
+     (a) the user has explicitly chosen dark: [data-theme="dark"]
+     (b) the user has chosen "system" AND the system is dark.
+   We define a single re-usable block per selector. Duplicate kept on purpose
+   so :root cascade stays predictable (no @apply / @layer hijinks). */
+[data-theme="dark"] {
+  --bg: #0b0b0c;
+  --bg-grad-a: #111113;
+  --bg-grad-b: #0a0a0b;
+  --panel: #131316;
+  --panel-2: #19191c;
+  --panel-3: #1f1f23;
+  --rule: #232328;
+  --border: #232328;
+  --border-strong: #2e2e34;
+
+  --text: #f5f5f4;
+  --text-2: #d4d4d0;
+  --muted: #8b8b95;
+  --muted-2: #5e5e66;
+
+  --accent: #6aa6ff;
+  --accent-press: #4a8fef;
+  --accent-ink: #98c0ff;
+  --accent-soft: rgba(106, 166, 255, 0.12);
+  --accent-line: rgba(106, 166, 255, 0.32);
+
+  --danger: #fb7185;
+  --danger-ink: #fda4af;
+  --danger-soft: rgba(251, 113, 133, 0.10);
+  --danger-line: rgba(251, 113, 133, 0.30);
+
+  --warning: #f59e0b;
+  --warning-ink: #fbbf24;
+  --warning-soft: rgba(245, 158, 11, 0.10);
+  --warning-line: rgba(245, 158, 11, 0.28);
+
+  --success: #4ade80;
+  --success-ink: #86efac;
+  --success-soft: rgba(74, 222, 128, 0.10);
+  --success-line: rgba(74, 222, 128, 0.28);
+
+  --dark-panel: #19191c;
+  --dark-panel-2: #1f1f23;
+  --dark-text: #fafafa;
+  --dark-muted: #a1a1aa;
+  --dark-border: #2c2c30;
+
+  --predicted: #a78bfa;
+  --predicted-ink: #c4b5fd;
+  --predicted-soft: rgba(167, 139, 250, 0.12);
+  --predicted-line: rgba(167, 139, 250, 0.32);
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --shadow-md: 0 18px 50px -18px rgba(0, 0, 0, 0.6);
+  --ring: 0 0 0 3px rgba(106, 166, 255, 0.35);
+}
+
 @media (prefers-color-scheme: dark) {
-  :root {
+  /* System dark only kicks in if user hasn't explicitly chosen anything.
+     If [data-theme] is set (even "light"), explicit wins. */
+  :root:not([data-theme]) {
     --bg: #0b0b0c;
     --bg-grad-a: #111113;
     --bg-grad-b: #0a0a0b;
@@ -150,6 +211,14 @@
     --shadow-md: 0 18px 50px -18px rgba(0, 0, 0, 0.6);
     --ring: 0 0 0 3px rgba(106, 166, 255, 0.35);
   }
+}
+
+/* Theme transitions — gentle, no full-page flash when toggling. */
+html { color-scheme: light dark; }
+[data-theme="light"] { color-scheme: light; }
+[data-theme="dark"]  { color-scheme: dark; }
+body, * {
+  transition: background-color 200ms ease, border-color 200ms ease, color 200ms ease;
 }
 
 html, body { min-height: 100%; }
