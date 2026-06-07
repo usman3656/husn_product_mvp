@@ -57,6 +57,27 @@
   --dark-muted: #a1a1aa;
   --dark-border: #2c2c30;
 
+  /* Semantic vocabulary — used to encode meaning, not decoration.
+     Green = aligned · Amber = uncertain · Red = conflict · Purple = predicted
+     Blue = understood (re-uses --accent). These tokens are referenced by
+     PulseBar, ConfidenceRing, RiskChip, PredictionChip. */
+  --aligned: var(--success);
+  --aligned-soft: var(--success-soft);
+  --aligned-line: var(--success-line);
+  --uncertain: var(--warning);
+  --uncertain-soft: var(--warning-soft);
+  --uncertain-line: var(--warning-line);
+  --conflict: var(--danger);
+  --conflict-soft: var(--danger-soft);
+  --conflict-line: var(--danger-line);
+  --predicted: #7c3aed;
+  --predicted-ink: #6d28d9;
+  --predicted-soft: #f4f0ff;
+  --predicted-line: #e0d4fb;
+  --understood: var(--accent);
+  --understood-soft: var(--accent-soft);
+  --understood-line: var(--accent-line);
+
   /* Shape & depth — soft, never bubbly */
   --radius-sm: 10px;
   --radius: 14px;
@@ -119,6 +140,11 @@
     --dark-text: #fafafa;
     --dark-muted: #a1a1aa;
     --dark-border: #2c2c30;
+
+    --predicted: #a78bfa;
+    --predicted-ink: #c4b5fd;
+    --predicted-soft: rgba(167, 139, 250, 0.12);
+    --predicted-line: rgba(167, 139, 250, 0.32);
 
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
     --shadow-md: 0 18px 50px -18px rgba(0, 0, 0, 0.6);
@@ -221,6 +247,35 @@ h1, h2, h3, h4 { color: var(--text); letter-spacing: -0.022em; font-weight: 600;
    Hide the default disclosure triangle so the summary chip stands on its own. */
 details > summary { list-style: none; cursor: pointer; }
 details > summary::-webkit-details-marker { display: none; }
+
+/* Live pulse — used on Confidence ring + active-status indicators so the
+   intelligence layer feels alive, not static. Subtle, never frantic. */
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes husn-pulse {
+    0% { opacity: 0.55; transform: scale(1); }
+    50% { opacity: 1; transform: scale(1.04); }
+    100% { opacity: 0.55; transform: scale(1); }
+  }
+  @keyframes husn-shimmer {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+  }
+  .husn-pulse { animation: husn-pulse 2.6s ease-in-out infinite; }
+  .husn-shimmer { position: relative; overflow: hidden; }
+  .husn-shimmer::after {
+    content: ""; position: absolute; inset: 0;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.18), transparent);
+    animation: husn-shimmer 2.8s ease-in-out infinite;
+    pointer-events: none;
+  }
+}
+
+/* SemanticTone helpers — map name → color */
+.tone-aligned { color: var(--aligned); }
+.tone-uncertain { color: var(--uncertain); }
+.tone-conflict { color: var(--conflict); }
+.tone-predicted { color: var(--predicted); }
+.tone-understood { color: var(--understood); }
 
 /* Numerals: tabular for figures, proportional for headlines */
 .tabular { font-variant-numeric: tabular-nums; }

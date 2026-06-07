@@ -1,7 +1,13 @@
 import Link from "next/link";
 
-import { EvidenceChip } from "@/components/ui";
 import { FETCH_INIT } from "@/lib/fetch-init";
+
+/* ============================================================
+   Explore — organized by understanding, not by issue type.
+   The lenses are: Projects · Teams · Risks · Ownership ·
+   Dependencies · Decisions · Resolved. Each lens is a way of
+   reading the same underlying activity, not a separate inbox.
+   ============================================================ */
 
 const SERVER_API_URL = process.env.API_URL ?? "http://api:8000";
 
@@ -16,23 +22,48 @@ type Finding = {
   closed_at: string | null;
 };
 
-async function fetchFindings(status: "open" | "closed" | "all"): Promise<Finding[]> {
-  try { const r = await fetch(`${SERVER_API_URL}/api/findings?status=${status}&limit=100`, FETCH_INIT); if (!r.ok) return []; return ((await r.json()) as { items: Finding[] }).items; }
-  catch { return []; }
+type Project = { id: number; slug: string; name: string; artifact_count: number; scopes: { source: string }[] };
+type Person = { id: number; primary_name: string | null; primary_email: string | null; identities: { source: string }[] };
+
+async function safeFetch<T>(url: string): Promise<T | null> {
+  try { const r = await fetch(url, FETCH_INIT); return r.ok ? ((await r.json()) as T) : null; } catch { return null; }
 }
 
-const SOURCE_LABEL: Record<string, string> = { jira: "Jira", slack: "Slack", google: "Google", microsoft: "Microsoft", email: "Email" };
+const SOURCE_LABEL: Record<string, string> = { jira: "Jira", slack: "Slack", google: "Google", microsoft: "Microsoft" };
 
-const SEV_WEIGHT: Record<Finding["severity"], number> = { high: 3, medium: 2, low: 1 };
+type Lens = "projects" | "teams" | "risks" | "ownership" | "dependencies" | "decisions" | "resolved";
 
-function kindLabel(rule_id: string): string {
-  if (rule_id === "R-DATE-1") return "Date conflict";
-  if (rule_id === "R-OWNER-1") return "Ownership gap";
-  if (rule_id === "R-STATUS-1") return "Status drift";
-  if (rule_id.startsWith("AGENT-FINDING-")) return "Context gap";
-  return "Concern";
+const LENSES: { key: Lens; label: string; tagline: string }[] = [
+  { key: "projects", label: "Projects", tagline: "Workstreams Husn is reading." },
+  { key: "teams", label: "Teams", tagline: "Who is working alongside whom." },
+  { key: "risks", label: "Risks", tagline: "What could go wrong if no one moves." },
+  { key: "ownership", label: "Ownership", tagline: "Who is responsible — and where it isn't clear." },
+  { key: "dependencies", label: "Dependencies", tagline: "What is waiting on what." },
+  { key: "decisions", label: "Decisions", tagline: "What's been agreed, and where it might shift." },
+  { key: "resolved", label: "Resolved", tagline: "What used to need attention, and no longer does." },
+];
+
+const SEV_RANK = { high: 3, medium: 2, low: 1 } as const;
+function byConsequence(a: Finding, b: Finding) {
+  const s = SEV_RANK[b.severity] - SEV_RANK[a.severity];
+  if (s !== 0) return s;
+  return Date.parse(b.opened_at) - Date.parse(a.opened_at);
 }
 
+function prettyKey(key?: string | null): string {
+  if (!key) return "this";
+  const last = key.split("/").pop() || key;
+  return last.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
+}
+function cleanTitle(f: Finding): string {
+  const key = prettyKey(f.details?.key);
+  if (f.rule_id === "R-DATE-1") return `${key} conflict`;
+  if (f.rule_id === "R-STATUS-1") return `${key} drift`;
+  if (f.rule_id === "R-OWNER-1") return `${key} unclear`;
+  if (f.rule_id.startsWith("R-DEP-")) return `${key} dependency`;
+  if (f.rule_id.startsWith("AGENT-FINDING-")) return f.summary.split(":")[0].split(" (")[0].trim() || "Pattern flagged";
+  return f.summary.split(":")[0].split(" (")[0].trim() || "Concern";
+}
 function timeAgo(iso: string | null): string {
   if (!iso) return "—";
   const t = Date.parse(iso);
@@ -43,109 +74,232 @@ function timeAgo(iso: string | null): string {
   return `${Math.floor(s / 86400)}d ago`;
 }
 
-export default async function ExplorePage({ searchParams }: { searchParams: Promise<{ status?: string }> }) {
+export default async function ExplorePage({ searchParams }: { searchParams: Promise<{ lens?: Lens }> }) {
   const sp = await searchParams;
-  const status = (sp.status === "closed" || sp.status === "all") ? sp.status : "open";
-  const findings = await fetchFindings(status);
-  const sorted = [...findings].sort((a, b) => {
-    const s = SEV_WEIGHT[b.severity] - SEV_WEIGHT[a.severity];
-    return s !== 0 ? s : Date.parse(b.opened_at) - Date.parse(a.opened_at);
-  });
+  const lens: Lens = LENSES.some((l) => l.key === sp.lens) ? (sp.lens as Lens) : "projects";
+
+  const [findingsRes, projectsRes, personsRes] = await Promise.all([
+    safeFetch<{ items: Finding[] }>(`${SERVER_API_URL}/api/findings?status=all&limit=200`),
+    safeFetch<{ projects: Project[] }>(`${SERVER_API_URL}/api/graph/projects`),
+    safeFetch<{ persons: Person[] }>(`${SERVER_API_URL}/api/graph/persons?limit=200`),
+  ]);
+
+  const allFindings = (findingsRes?.items ?? []);
+  const open = allFindings.filter((f) => f.status === "open");
+  const closed = allFindings.filter((f) => f.status === "closed");
 
   return (
-    <main className="mx-auto px-6 lg:px-10 pt-12 pb-24" style={{ maxWidth: "var(--content-w)" }}>
+    <main className="mx-auto px-6 lg:px-12 pt-12 pb-32" style={{ maxWidth: 1100 }}>
       <header className="husn-rise" style={{ maxWidth: 720 }}>
         <p className="husn-eyebrow">Explore</p>
-        <h1 className="husn-display mt-4">Everything Husn has flagged.</h1>
-        <p className="husn-prose mt-5 max-w-[60ch]">
-          The full record. Filter by what's open, what was resolved, or look at the whole archive.
-        </p>
+        <h1 className="husn-display mt-4">{LENSES.find((l) => l.key === lens)?.label}</h1>
+        <p className="husn-prose mt-5 max-w-[60ch]">{LENSES.find((l) => l.key === lens)?.tagline}</p>
       </header>
 
-      <nav className="mt-10 flex items-center gap-2" aria-label="Filter">
-        <FilterTab label="Open" href="/explore" active={status === "open"} />
-        <FilterTab label="Resolved" href="/explore?status=closed" active={status === "closed"} />
-        <FilterTab label="All" href="/explore?status=all" active={status === "all"} />
-        <span className="ml-auto husn-meta">
-          {sorted.length} {sorted.length === 1 ? "item" : "items"}
-        </span>
+      {/* Lens nav — a clean horizontal rail, no tabs-y feel */}
+      <nav className="mt-10 -mx-1 flex flex-wrap items-center gap-1" aria-label="Lenses">
+        {LENSES.map((l) => (
+          <Link
+            key={l.key}
+            href={l.key === "projects" ? "/explore" : `/explore?lens=${l.key}`}
+            className="rounded-full border px-3.5 py-1.5 text-[13px] font-medium transition-colors"
+            style={{
+              borderColor: l.key === lens ? "var(--text)" : "var(--border)",
+              background: l.key === lens ? "var(--text)" : "var(--panel)",
+              color: l.key === lens ? "var(--bg)" : "var(--text-2)",
+            }}
+          >
+            {l.label}
+          </Link>
+        ))}
       </nav>
 
-      <section className="mt-8">
-        {sorted.length === 0 ? (
-          <div
-            className="rounded-[var(--radius)] border border-dashed px-6 py-12 text-center"
-            style={{ borderColor: "var(--border-strong)", background: "var(--panel-2)" }}
-          >
-            <p className="text-[14.5px]" style={{ color: "var(--text)" }}>
-              Nothing to show here.
-            </p>
-            <p className="mt-2 text-[13px]" style={{ color: "var(--muted)" }}>
-              {status === "open"
-                ? "Husn hasn't flagged anything as open."
-                : status === "closed"
-                ? "No resolved findings yet."
-                : "No findings recorded."}
-            </p>
-          </div>
-        ) : (
-          <ul className="space-y-2">
-            {sorted.map((f) => <Row key={f.id} f={f} />)}
-          </ul>
-        )}
+      <section className="mt-10 husn-rise" style={{ animationDelay: "60ms" }}>
+        {lens === "projects" ? <ProjectsLens projects={projectsRes?.projects ?? []} findings={open} /> : null}
+        {lens === "teams" ? <TeamsLens persons={personsRes?.persons ?? []} /> : null}
+        {lens === "risks" ? <FindingsLens items={open.filter((f) => f.rule_id !== "R-OWNER-1").sort(byConsequence)} hint="Open concerns that may cost the org something if no one moves." /> : null}
+        {lens === "ownership" ? <FindingsLens items={open.filter((f) => f.rule_id === "R-OWNER-1").sort(byConsequence)} hint="Where Husn can't tell who's responsible." /> : null}
+        {lens === "dependencies" ? <DependenciesLens items={open.filter((f) => f.rule_id.startsWith("R-DEP-"))} /> : null}
+        {lens === "decisions" ? <DecisionsLens /> : null}
+        {lens === "resolved" ? <FindingsLens items={closed.sort((a, b) => Date.parse(b.closed_at ?? "") - Date.parse(a.closed_at ?? ""))} resolved hint="Things Husn flagged that have since come back into alignment." /> : null}
       </section>
     </main>
   );
 }
 
-function FilterTab({ label, href, active }: { label: string; href: string; active: boolean }) {
+/* ------- Project lens ------- */
+function ProjectsLens({ projects, findings }: { projects: Project[]; findings: Finding[] }) {
+  if (projects.length === 0) return <EmptyEditorial title="No projects mapped yet." body={<>Connect a tool to give Husn somewhere to read from. <Link href="/connections" style={{ color: "var(--accent)" }} className="font-medium">Open Connections →</Link></>} />;
   return (
-    <Link
-      href={href}
-      className="rounded-full border px-3.5 py-1.5 text-[13px] font-medium transition-colors"
-      style={{
-        borderColor: active ? "var(--text)" : "var(--border)",
-        background: active ? "var(--text)" : "var(--panel)",
-        color: active ? "var(--bg)" : "var(--text-2)",
-      }}
-    >
-      {label}
-    </Link>
+    <ul className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+      {projects.map((p) => {
+        const related = findings.filter((f) =>
+          Object.values(f.details?.per_source ?? {}).some((arr: unknown) =>
+            Array.isArray(arr) && (arr as { artifact_title?: string }[]).some((ev) => (ev.artifact_title ?? "").toLowerCase().includes(p.slug.toLowerCase())),
+          ),
+        );
+        const state = related.length === 0 ? "Quiet" : `${related.length} open ${related.length === 1 ? "concern" : "concerns"}`;
+        const tone = related.length === 0 ? "aligned" : related.length <= 2 ? "uncertain" : "conflict";
+        return (
+          <li key={p.id}>
+            <Link
+              href="/organization"
+              className="block rounded-[var(--radius)] border px-5 py-5 husn-lift"
+              style={{ borderColor: "var(--border)", background: "var(--panel)" }}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-[10.5px] font-mono uppercase" style={{ color: "var(--muted-2)", letterSpacing: 0.06 }}>{p.slug}</p>
+                  <h3 className="husn-heading mt-1.5" style={{ fontSize: 18 }}>{p.name}</h3>
+                  <p className="mt-2 text-[13px]" style={{ color: "var(--muted)" }}>{state}.</p>
+                </div>
+                <ToneDot tone={tone} />
+              </div>
+              <div className="mt-4 flex flex-wrap items-center gap-1.5">
+                {p.scopes.slice(0, 4).map((s, i) => (
+                  <span key={i} className="inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 font-mono text-[10.5px]" style={{ borderColor: "var(--border)", background: "var(--panel-2)", color: "var(--muted)" }}>
+                    {SOURCE_LABEL[s.source] ?? s.source}
+                  </span>
+                ))}
+              </div>
+            </Link>
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
-function Row({ f }: { f: Finding }) {
-  const sources = Object.keys(f.details?.per_source ?? {});
+/* ------- Teams lens ------- */
+function TeamsLens({ persons }: { persons: Person[] }) {
+  if (persons.length === 0) return <EmptyEditorial title="No people resolved yet." body="They appear here as Husn reads activity across your tools." />;
   return (
-    <li>
-      <Link
-        href={`/investigations/${f.id}`}
-        className="block rounded-[var(--radius)] border px-6 py-5 husn-lift"
-        style={{ borderColor: "var(--border)", background: "var(--panel)" }}
-      >
-        <div className="flex flex-wrap items-baseline gap-2.5">
-          <p className="husn-eyebrow" style={{ fontSize: 10.5 }}>{kindLabel(f.rule_id)}</p>
-          <span aria-hidden style={{ color: "var(--muted-2)" }}>·</span>
-          <p className="husn-meta">{f.status === "closed" ? `Resolved ${timeAgo(f.closed_at)}` : `Opened ${timeAgo(f.opened_at)}`}</p>
-          <SevDot severity={f.severity} />
-        </div>
-        <h3 className="husn-heading mt-2" style={{ fontSize: 18 }}>{f.summary}</h3>
-        {sources.length > 0 ? (
-          <div className="mt-3 flex flex-wrap gap-1.5">
-            {sources.slice(0, 5).map((s) => <EvidenceChip key={s} source={SOURCE_LABEL[s] ?? s} />)}
-          </div>
-        ) : null}
-      </Link>
-    </li>
+    <>
+      <p className="husn-prose mb-6 max-w-[58ch]">
+        Husn resolves the same person across their Slack handle, Jira account, and email aliases.
+        Below are the people showing up in the activity Husn reads.
+      </p>
+      <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        {persons.slice(0, 24).map((p) => {
+          const name = p.primary_name ?? p.primary_email ?? `#${p.id}`;
+          const initials = (name.match(/\b[\p{L}\p{N}]/gu) || []).slice(0, 2).join("").toUpperCase() || "·";
+          return (
+            <li key={p.id} className="rounded-[var(--radius)] border p-4 husn-lift" style={{ borderColor: "var(--border)", background: "var(--panel)" }}>
+              <div className="flex items-start gap-3">
+                <span aria-hidden className="grid h-9 w-9 place-items-center rounded-full text-[12px] font-semibold shrink-0" style={{ background: "var(--panel-2)", color: "var(--text)", border: "1px solid var(--border)" }}>
+                  {initials}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-[14px] font-medium">{name}</p>
+                  {p.primary_email ? <p className="truncate text-[12px]" style={{ color: "var(--muted)" }}>{p.primary_email}</p> : null}
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {p.identities.slice(0, 4).map((idt, i) => (
+                      <span key={i} className="rounded-md border px-1.5 py-0.5 font-mono text-[9.5px]" style={{ borderColor: "var(--border)", color: "var(--muted)", background: "var(--panel-2)" }}>
+                        {SOURCE_LABEL[idt.source] ?? idt.source}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </>
   );
 }
 
-function SevDot({ severity }: { severity: Finding["severity"] }) {
-  const c = severity === "high" ? "var(--danger)" : severity === "medium" ? "var(--warning)" : "var(--muted)";
+/* ------- Findings lens (Risks, Ownership, Resolved) ------- */
+function FindingsLens({ items, hint, resolved }: { items: Finding[]; hint: string; resolved?: boolean }) {
+  if (items.length === 0) {
+    return (
+      <EmptyEditorial
+        title={resolved ? "Nothing has been resolved yet." : "Nothing to see here."}
+        body={hint}
+      />
+    );
+  }
   return (
-    <span className="inline-flex items-center gap-1 husn-meta" style={{ color: c }}>
-      <span aria-hidden style={{ background: c, width: 5, height: 5, borderRadius: 999, display: "inline-block" }} />
-      {severity}
-    </span>
+    <>
+      <p className="husn-prose mb-6 max-w-[58ch]">{hint}</p>
+      <ul className="space-y-2">
+        {items.map((f) => {
+          const tone = f.severity === "high" ? "conflict" : f.severity === "medium" ? "uncertain" : "understood";
+          return (
+            <li key={f.id}>
+              <Link
+                href={`/investigations/${f.id}`}
+                className="block rounded-[var(--radius)] border px-5 py-5 husn-lift"
+                style={{ borderColor: "var(--border)", background: "var(--panel)" }}
+              >
+                <div className="flex items-start gap-3">
+                  <ToneDot tone={tone} />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[15.5px] font-medium" style={{ color: "var(--text)" }}>{cleanTitle(f)}</p>
+                    <p className="mt-1.5 text-[13px]" style={{ color: "var(--muted)" }}>
+                      {resolved ? `Resolved ${timeAgo(f.closed_at)}` : `Opened ${timeAgo(f.opened_at)}`}
+                    </p>
+                  </div>
+                  <span aria-hidden className="self-center text-[14px]" style={{ color: "var(--muted)" }}>→</span>
+                </div>
+              </Link>
+            </li>
+          );
+        })}
+      </ul>
+    </>
+  );
+}
+
+/* ------- Dependencies lens ------- */
+function DependenciesLens({ items }: { items: Finding[] }) {
+  if (items.length === 0) {
+    return (
+      <EmptyEditorial
+        title="No dependency conflicts surfaced."
+        body="Husn watches for blocked-by relationships across Jira and the conversations around them. None are at risk right now."
+      />
+    );
+  }
+  return <FindingsLens items={items} hint="What's waiting on what — and where the chain is strained." />;
+}
+
+/* ------- Decisions lens ------- */
+function DecisionsLens() {
+  return (
+    <EmptyEditorial
+      title="Decisions surfacing is in development."
+      body="Husn already tracks dates, owners, statuses, and dependencies. Surfacing decisions as a first-class lens — what was agreed, by whom, and where it's now shifting — is the next deterministic rule on the roadmap."
+    />
+  );
+}
+
+/* ------- shared ------- */
+function ToneDot({ tone }: { tone: "aligned" | "uncertain" | "conflict" | "understood" }) {
+  const colorVar =
+    tone === "aligned" ? "var(--aligned)" :
+    tone === "uncertain" ? "var(--uncertain)" :
+    tone === "conflict" ? "var(--conflict)" :
+    "var(--understood)";
+  const softVar =
+    tone === "aligned" ? "var(--aligned-soft)" :
+    tone === "uncertain" ? "var(--uncertain-soft)" :
+    tone === "conflict" ? "var(--conflict-soft)" :
+    "var(--understood-soft)";
+  return (
+    <span
+      aria-hidden
+      className="mt-1.5 inline-block rounded-full shrink-0 husn-pulse"
+      style={{ width: 10, height: 10, background: colorVar, boxShadow: `0 0 0 5px ${softVar}` }}
+    />
+  );
+}
+
+function EmptyEditorial({ title, body }: { title: string; body: React.ReactNode }) {
+  return (
+    <div className="rounded-[var(--radius)] border border-dashed px-6 py-12" style={{ borderColor: "var(--border-strong)", background: "var(--panel-2)" }}>
+      <p className="text-[15px] font-medium" style={{ color: "var(--text)" }}>{title}</p>
+      <div className="mt-2 text-[13.5px] leading-relaxed max-w-[58ch]" style={{ color: "var(--muted)" }}>{body}</div>
+    </div>
   );
 }

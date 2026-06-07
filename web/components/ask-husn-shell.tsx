@@ -370,24 +370,77 @@ function MessageBlock({ m }: { m: Message }) {
       </div>
     );
   }
+
+  const evidenceCount = m.cited_claim_ids.length + m.cited_artifact_ids.length;
+  const hasEvidence = evidenceCount > 0;
+
   return (
-    <div>
-      <p className="husn-eyebrow" style={{ color: "var(--accent-ink)" }}>Husn</p>
-      <div className="mt-2 husn-prose whitespace-pre-wrap" style={{ fontSize: 17, lineHeight: 1.65, color: "var(--text)" }}>
-        <CitedText text={m.content} />
+    <article
+      className="rounded-[var(--radius-lg)] border overflow-hidden"
+      style={{ borderColor: "var(--border)", background: "var(--panel)" }}
+    >
+      {/* Header */}
+      <div className="px-6 pt-6 pb-3 flex items-center gap-2">
+        <span
+          aria-hidden
+          className="inline-grid h-6 w-6 place-items-center rounded-full"
+          style={{ background: "var(--text)", color: "var(--bg)" }}
+        >
+          <span className="text-[11px] font-semibold leading-none">h</span>
+        </span>
+        <p className="husn-eyebrow" style={{ color: "var(--accent-ink)" }}>Husn says</p>
       </div>
-      {(m.cited_claim_ids.length > 0 || m.cited_artifact_ids.length > 0) ? (
-        <div className="mt-5 pt-4 border-t flex flex-wrap items-center gap-2" style={{ borderColor: "var(--rule)" }}>
-          <p className="husn-meta" style={{ marginRight: 4 }}>Sources</p>
-          {m.cited_claim_ids.map((id) => (
-            <Footnote key={`c${id}`} label={`Claim #${id}`} />
-          ))}
-          {m.cited_artifact_ids.map((id) => (
-            <Footnote key={`a${id}`} label={`Source #${id}`} accent />
-          ))}
+
+      {/* Conclusion */}
+      <div className="px-6 pb-6">
+        <p className="husn-eyebrow" style={{ fontSize: 10.5 }}>Conclusion</p>
+        <div
+          className="mt-2 husn-prose whitespace-pre-wrap"
+          style={{ fontSize: 17.5, lineHeight: 1.6, color: "var(--text)" }}
+        >
+          <CitedText text={m.content} />
+        </div>
+      </div>
+
+      {/* Evidence */}
+      {hasEvidence ? (
+        <div
+          className="px-6 py-5 border-t"
+          style={{ borderColor: "var(--rule)", background: "var(--panel-2)" }}
+        >
+          <p className="husn-eyebrow" style={{ fontSize: 10.5 }}>Evidence ({evidenceCount})</p>
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {m.cited_artifact_ids.map((id) => (
+              <Footnote key={`a${id}`} label={`Source #${id}`} kind="source" />
+            ))}
+            {m.cited_claim_ids.map((id) => (
+              <Footnote key={`c${id}`} label={`Fact #${id}`} kind="fact" />
+            ))}
+          </div>
         </div>
       ) : null}
-    </div>
+
+      {/* Recommended next step */}
+      {hasEvidence ? (
+        <div
+          className="px-6 py-4 border-t flex flex-wrap items-center justify-between gap-3"
+          style={{ borderColor: "var(--rule)" }}
+        >
+          <p className="text-[13px]" style={{ color: "var(--muted)" }}>
+            Want Husn to investigate further, or draft a message to the people closest to the answer?
+          </p>
+          <div className="flex items-center gap-2">
+            <a
+              href="/"
+              className="rounded-full border px-3 py-1.5 text-[12.5px] font-medium"
+              style={{ borderColor: "var(--border-strong)", background: "var(--panel)", color: "var(--text)" }}
+            >
+              See briefing
+            </a>
+          </div>
+        </div>
+      ) : null}
+    </article>
   );
 }
 
@@ -417,15 +470,16 @@ function ThinkingBlock() {
   );
 }
 
-function Footnote({ label, accent }: { label: string; accent?: boolean }) {
+function Footnote({ label, kind = "neutral" }: { label: string; kind?: "neutral" | "source" | "fact" }) {
+  const styles: Record<string, React.CSSProperties> = {
+    neutral: { background: "var(--panel-2)", color: "var(--muted)", borderColor: "var(--border)" },
+    source: { background: "var(--understood-soft)", color: "var(--accent-ink)", borderColor: "var(--understood-line)" },
+    fact: { background: "var(--predicted-soft)", color: "var(--predicted-ink)", borderColor: "var(--predicted-line)" },
+  };
   return (
     <span
       className="inline-flex items-center rounded-md border px-2 py-0.5 font-mono text-[10.5px]"
-      style={{
-        background: accent ? "var(--accent-soft)" : "var(--panel-2)",
-        color: accent ? "var(--accent-ink)" : "var(--muted)",
-        borderColor: accent ? "var(--accent-line)" : "var(--border)",
-      }}
+      style={styles[kind]}
     >
       {label}
     </span>

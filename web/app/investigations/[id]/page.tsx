@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { ReachOutButton, type ReachOutContext } from "@/components/reach-out";
 import { EvidenceChip } from "@/components/ui";
 import { FETCH_INIT } from "@/lib/fetch-init";
 
@@ -76,6 +77,57 @@ function kindLabel(rule_id: string): string {
   if (rule_id === "R-STATUS-1") return "Status drift";
   if (rule_id.startsWith("AGENT-FINDING-")) return "Context gap";
   return "Concern";
+}
+
+function prettyKey(key?: string | null): string {
+  if (!key) return "this";
+  const last = key.split("/").pop() || key;
+  return last.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
+}
+
+function reachOutContext(f: Finding): ReachOutContext {
+  const sources: string[] = [];
+  for (const ev of f.evidence) {
+    const src = ev.extractor_id?.split(".")[0];
+    if (src && !sources.includes(src)) sources.push(src);
+  }
+  const sourceList = sources.map((s) => SOURCE_LABEL[s] ?? s).join(" and ");
+  const k = prettyKey(f.details?.key);
+
+  if (f.rule_id === "R-DATE-1") {
+    return {
+      who: "The likely owner",
+      why: `${sourceList || "Multiple sources"} are recording different dates. Whoever last touched these is closest to the truth.`,
+      about: `${k} conflict`,
+      draft: `Hey — quick one. ${sourceList || "Two of our tools"} are showing different dates for ${k.toLowerCase()}. Which should we treat as the source of truth so I can keep downstream plans aligned?`,
+      via: sources.includes("slack") ? "slack" : "email",
+    };
+  }
+  if (f.rule_id === "R-STATUS-1") {
+    return {
+      who: "The likely owner",
+      why: `Status is being reported differently across ${sourceList || "tools"}. They have ground truth.`,
+      about: `${k} drift`,
+      draft: `Hey — saw the status on ${k.toLowerCase()} read differently across ${sourceList || "our tools"}. Where are we actually? Want to make sure the rest of the team is reading the same picture.`,
+      via: sources.includes("slack") ? "slack" : "email",
+    };
+  }
+  if (f.rule_id === "R-OWNER-1") {
+    return {
+      who: "Possible owners",
+      why: `Multiple names are showing up across ${sourceList || "tools"}. Worth a single confirmation.`,
+      about: `${k} unclear`,
+      draft: `Hi — small confirm: who owns ${k.toLowerCase()} right now? I'm seeing a few names and want to point updates at the right person.`,
+      via: "slack",
+    };
+  }
+  return {
+    who: "The likely owner",
+    why: "Husn surfaced uncertainty here and they have the most recent context.",
+    about: kindLabel(f.rule_id),
+    draft: `Hi — could you give me a quick read on where we are with this? Trying to align before the next planning cycle.`,
+    via: "slack",
+  };
 }
 
 export default async function InvestigationPage({ params }: { params: Promise<{ id: string }> }) {
@@ -177,8 +229,15 @@ export default async function InvestigationPage({ params }: { params: Promise<{ 
             style={{ borderColor: "var(--border)", background: "var(--panel)" }}
           >
             <p className="husn-eyebrow">Actions</p>
-            <ul className="mt-4 space-y-2">
-              <ActionItem label="Reach out to the owner" hint="Send a direct request via Slack or email." />
+            <div className="mt-4 flex flex-col gap-2">
+              <ReachOutButton context={reachOutContext(f)} variant="primary">
+                Reach Out For Me
+              </ReachOutButton>
+              <p className="text-[12px] leading-relaxed" style={{ color: "var(--muted)" }}>
+                Husn drafts the message and queues it to the person closest to the answer.
+              </p>
+            </div>
+            <ul className="mt-5 space-y-2">
               <ActionItem label="Collect missing information" hint="Ask the relevant sources for a fresh state." />
               <ActionItem label="Ask for an update" hint="Open a thread asking for an answer in 24h." />
               <ActionItem label="Follow up later" hint="Snooze until tomorrow." />

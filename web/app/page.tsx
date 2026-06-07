@@ -1,14 +1,18 @@
 import Link from "next/link";
 
-import { EvidenceChip } from "@/components/ui";
+import { ReachOutButton, type ReachOutContext } from "@/components/reach-out";
 import { FETCH_INIT } from "@/lib/fetch-init";
 
 /* ============================================================
-   Briefing — the homepage.
-   This is not a dashboard. It's a memo. The most consequential
-   thing you should know is on top, in plain prose, with the
-   evidence that backs it. Then a short list of other things
-   that deserve attention. Nothing else.
+   Briefing — the homepage IS the product.
+   Six named sections, in order:
+     1. Organizational Pulse
+     2. Most Consequential Issue
+     3. Emerging Risks
+     4. Missing Information
+     5. Recommended Actions
+     6. Active Projects
+   Built from the existing findings + graph + agent endpoints.
    ============================================================ */
 
 const SERVER_API_URL = process.env.API_URL ?? "http://api:8000";
@@ -22,13 +26,7 @@ type PerSourceEvidence = {
   value: string | null;
   confidence: number;
   extractor_id: string;
-  source_anchor: {
-    kind: "field" | "span";
-    artifact_id?: number;
-    field_path?: string;
-    snippet?: string;
-    intent?: string;
-  };
+  source_anchor: { kind: "field" | "span"; field_path?: string; snippet?: string };
 };
 
 type Finding = {
@@ -57,89 +55,94 @@ type AgentStatus = {
   in_progress: number;
 };
 
-async function fetchFindings(): Promise<Finding[]> {
-  try {
-    const r = await fetch(`${SERVER_API_URL}/api/findings?status=open&limit=24`, FETCH_INIT);
-    if (!r.ok) return [];
-    const b = (await r.json()) as { items: Finding[] };
-    return b.items;
-  } catch { return []; }
-}
-
-async function fetchStatus(): Promise<AgentStatus | null> {
-  try {
-    const r = await fetch(`${SERVER_API_URL}/api/agent/status`, FETCH_INIT);
-    if (!r.ok) return null;
-    return (await r.json()) as AgentStatus;
-  } catch { return null; }
-}
-
-const SOURCE_LABEL: Record<string, string> = {
-  jira: "Jira",
-  slack: "Slack",
-  google: "Google",
-  microsoft: "Microsoft",
-  email: "Email",
+type GraphSummary = {
+  counts: { persons: number; projects: number; artifacts: number };
+  last_raw_fetched_at: string | null;
+  last_normalized_at: string | null;
 };
 
-/* Sort by consequence: severity desc, then most recently opened. */
-const SEV_WEIGHT: Record<Finding["severity"], number> = { high: 3, medium: 2, low: 1 };
+type Project = {
+  id: number;
+  slug: string;
+  name: string;
+  artifact_count: number;
+  scopes: { source: string; kind: string; id: string }[];
+};
+
+async function safeFetch<T>(url: string): Promise<T | null> {
+  try { const r = await fetch(url, FETCH_INIT); return r.ok ? ((await r.json()) as T) : null; } catch { return null; }
+}
+
+const SOURCE_LABEL: Record<string, string> = { jira: "Jira", slack: "Slack", google: "Google", microsoft: "Microsoft", email: "Email" };
+
+/* ------- derivations ------- */
+
+const SEV_WEIGHT = { high: 12, medium: 5, low: 1 } as const;
+const SEV_RANK = { high: 3, medium: 2, low: 1 } as const;
+
+function confidence(findings: Finding[]): number {
+  const w = findings.reduce((acc, f) => acc + SEV_WEIGHT[f.severity], 0);
+  return Math.max(0, Math.min(100, 100 - w));
+}
+
+function alignment(findings: Finding[]): number {
+  const drift = findings.filter((f) => f.rule_id === "R-DATE-1" || f.rule_id === "R-STATUS-1").length;
+  return Math.max(0, Math.min(100, 100 - drift * 9));
+}
+
+/* "accelerating" | "steady" | "stalling" — based on freshness of normalization. */
+function momentum(g?: GraphSummary | null): { label: string; tone: SemanticTone } {
+  const ts = g?.last_raw_fetched_at;
+  if (!ts) return { label: "settling in", tone: "uncertain" };
+  const mins = (Date.now() - Date.parse(ts)) / 60000;
+  if (mins < 30) return { label: "accelerating", tone: "aligned" };
+  if (mins < 6 * 60) return { label: "steady", tone: "understood" };
+  if (mins < 24 * 60) return { label: "easing", tone: "uncertain" };
+  return { label: "quiet", tone: "uncertain" };
+}
+
+function emergingRisks(findings: Finding[], hours = 48): Finding[] {
+  const cut = Date.now() - hours * 3600 * 1000;
+  return findings
+    .filter((f) => Date.parse(f.opened_at) > cut && f.severity !== "low")
+    .sort(byConsequence)
+    .slice(0, 4);
+}
+
+function missingInformation(findings: Finding[]): Finding[] {
+  return findings
+    .filter((f) => f.rule_id === "R-OWNER-1" || f.rule_id.startsWith("AGENT-FINDING-"))
+    .sort(byConsequence)
+    .slice(0, 4);
+}
+
 function byConsequence(a: Finding, b: Finding) {
-  const s = SEV_WEIGHT[b.severity] - SEV_WEIGHT[a.severity];
+  const s = SEV_RANK[b.severity] - SEV_RANK[a.severity];
   if (s !== 0) return s;
   return Date.parse(b.opened_at) - Date.parse(a.opened_at);
 }
 
-/* Editorial labels for each rule — short, human, no jargon. */
 function entryKind(rule_id: string): string {
   if (rule_id === "R-DATE-1") return "Date conflict";
   if (rule_id === "R-OWNER-1") return "Ownership gap";
   if (rule_id === "R-STATUS-1") return "Status drift";
-  if (rule_id.startsWith("AGENT-FINDING-")) return "Context gap";
+  if (rule_id.startsWith("AGENT-FINDING-")) return "Pattern flagged";
   return "Concern";
 }
 
-/* "owner/reporter" -> "Reporter". "status/delivery_status" -> "Delivery status".
- * "deadline" -> "Deadline". Keeps the title short and readable. */
 function prettyKey(key?: string | null): string {
   if (!key) return "this";
   const last = key.split("/").pop() || key;
-  return last
-    .replace(/_/g, " ")
-    .replace(/\bdate\b/i, "date")
-    .replace(/^./, (c) => c.toUpperCase());
+  return last.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
 }
 
-/* A short, editorial title. The backend's `summary` is factually correct but
- * dumps every distinct value into the string; we derive something a human
- * would actually write. */
 function cleanTitle(f: Finding): string {
   const key = prettyKey(f.details?.key);
   if (f.rule_id === "R-DATE-1") return `${key} conflict`;
   if (f.rule_id === "R-STATUS-1") return `${key} drift`;
   if (f.rule_id === "R-OWNER-1") return `${key} unclear`;
-  if (f.rule_id.startsWith("AGENT-FINDING-")) {
-    return f.summary.split(":")[0].split(" (")[0].trim() || "Pattern flagged";
-  }
+  if (f.rule_id.startsWith("AGENT-FINDING-")) return f.summary.split(":")[0].split(" (")[0].trim() || "Pattern flagged";
   return f.summary.split(":")[0].split(" (")[0].trim() || "Concern";
-}
-
-/* One-sentence under-title. Doesn't repeat the title — just locates the
- * disagreement. */
-function narration(f: Finding): string {
-  const sources = Object.keys(f.details?.per_source ?? {});
-  if (sources.length === 0) return "Opened just now — evidence is being attached.";
-  if (sources.length >= 2) {
-    const list = sources.map((s) => SOURCE_LABEL[s] ?? s).join(" and ");
-    return `Two sources disagree — ${list}.`;
-  }
-  return `Surfaced from ${SOURCE_LABEL[sources[0]] ?? sources[0]}.`;
-}
-
-function todayHeadline(date = new Date()): string {
-  const wd = date.toLocaleDateString(undefined, { weekday: "long" });
-  const md = date.toLocaleDateString(undefined, { day: "numeric", month: "long" });
-  return `${wd}, ${md}`;
 }
 
 function timeAgo(iso: string | null): string {
@@ -153,301 +156,811 @@ function timeAgo(iso: string | null): string {
   return `${Math.floor(s / 86400)} days ago`;
 }
 
+function todayHeadline(): string {
+  return new Date().toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" });
+}
+
+/* Per-finding confidence — lower is worse. */
+function perFindingConfidence(f: Finding): number {
+  if (f.severity === "high") return 38;
+  if (f.severity === "medium") return 62;
+  return 84;
+}
+
+/* Identify the human(s) likely closest to resolution. We don't have a join to
+ * person on findings, so we extract from R-OWNER-1 distinct_values when
+ * available, else fall back to the source systems. */
+function peopleClosest(f: Finding): string[] {
+  if (f.rule_id === "R-OWNER-1") {
+    return (f.details?.distinct_values ?? []).filter(Boolean).slice(0, 4);
+  }
+  const sources = Object.keys(f.details?.per_source ?? {});
+  return sources.map((s) => `Owner in ${SOURCE_LABEL[s] ?? s}`).slice(0, 2);
+}
+
+/* Build a Reach-Out context from a finding. Editorial — the goal is a draft
+ * that's already 90% ready to send. */
+function reachOutContext(f: Finding): ReachOutContext {
+  const people = peopleClosest(f);
+  const who = people[0] ?? "The owner";
+  const title = cleanTitle(f).toLowerCase();
+  const sources = Object.keys(f.details?.per_source ?? {});
+  const sourceList = sources.map((s) => SOURCE_LABEL[s] ?? s).join(" and ");
+
+  if (f.rule_id === "R-DATE-1") {
+    const distinct = f.details?.distinct_values ?? [];
+    return {
+      who,
+      why: `${SOURCE_LABEL[sources[0]] ?? "One source"} and ${SOURCE_LABEL[sources[1]] ?? "another"} are recording different dates. They were closest to the last change.`,
+      about: cleanTitle(f),
+      draft: `Hey — quick one. ${sourceList} are showing different dates for ${prettyKey(f.details?.key).toLowerCase()}${distinct.length >= 2 ? ` (${distinct[0]} vs ${distinct[1]})` : ""}. Which one should we treat as the source of truth so I can keep downstream plans aligned?`,
+      via: sources.includes("slack") ? "slack" : "email",
+    };
+  }
+  if (f.rule_id === "R-STATUS-1") {
+    const distinct = f.details?.distinct_values ?? [];
+    return {
+      who,
+      why: `Status is being reported differently across ${sourceList || "tools"}. They have ground truth.`,
+      about: cleanTitle(f),
+      draft: `Hey — saw ${SOURCE_LABEL[sources[0]] ?? "one source"} marked "${distinct[0] ?? "one status"}" and ${SOURCE_LABEL[sources[1]] ?? "another"} "${distinct[1] ?? "another"}". Where are we actually? Want to make sure the rest of the team is reading the same picture.`,
+      via: sources.includes("slack") ? "slack" : "email",
+    };
+  }
+  if (f.rule_id === "R-OWNER-1") {
+    return {
+      who: people.join(", ") || "Possible owners",
+      why: `Multiple names are showing up as the owner across ${sourceList || "tools"}. Worth a confirm.`,
+      about: cleanTitle(f),
+      draft: `Hi — small confirm: who's the single owner on ${prettyKey(f.details?.key).toLowerCase()} right now? I'm seeing a few names and want to point updates at the right person.`,
+      via: "slack",
+    };
+  }
+  return {
+    who,
+    why: "Husn surfaced uncertainty here and they have the most recent context.",
+    about: cleanTitle(f),
+    draft: `Hi — could you give me a quick read on where we are with this? Trying to align before the next planning cycle.`,
+    via: "slack",
+  };
+}
+
+/* =====================================================
+   Page
+   ===================================================== */
+
 export default async function Briefing() {
-  const [findings, status] = await Promise.all([fetchFindings(), fetchStatus()]);
-  const sorted = [...findings].sort(byConsequence);
-  const top = sorted[0];
-  const rest = sorted.slice(1);
-  const count = sorted.length;
+  const [findingsRes, statusRes, graphSummary, projectsRes] = await Promise.all([
+    safeFetch<{ items: Finding[] }>(`${SERVER_API_URL}/api/findings?status=open&limit=40`),
+    safeFetch<AgentStatus>(`${SERVER_API_URL}/api/agent/status`),
+    safeFetch<GraphSummary>(`${SERVER_API_URL}/api/graph/summary`),
+    safeFetch<{ projects: Project[] }>(`${SERVER_API_URL}/api/graph/projects`),
+  ]);
+
+  const findings = (findingsRes?.items ?? []).sort(byConsequence);
+  const projects = projectsRes?.projects ?? [];
+  const top = findings[0] ?? null;
+
+  const conf = confidence(findings);
+  const alig = alignment(findings);
+  const mom = momentum(graphSummary);
+  const risks = emergingRisks(findings);
+  const missing = missingInformation(findings);
 
   return (
-    <main className="mx-auto px-6 lg:px-10 pt-12 pb-24" style={{ maxWidth: "var(--content-w)" }}>
+    <main className="mx-auto px-6 lg:px-12 pt-12 pb-32" style={{ maxWidth: 1100 }}>
       {/* Editorial header */}
       <header className="husn-rise" style={{ maxWidth: 720 }}>
         <p className="husn-meta">
-          {todayHeadline()} · Updated {timeAgo(status?.last_run_at ?? null)}
+          {todayHeadline()} · The brief, refreshed {timeAgo(statusRes?.last_run_at ?? null)}
         </p>
-        <h1 className="husn-display mt-4">
-          Today&apos;s brief.
-        </h1>
+        <h1 className="husn-display mt-4">Today&apos;s briefing.</h1>
         <p className="husn-prose mt-5 max-w-[60ch]">
-          {leadIn(count)}
+          {leadIn(findings.length, conf)}
         </p>
       </header>
 
-      {/* Top concern */}
-      {top ? (
-        <section className="mt-14 husn-rise" style={{ animationDelay: "60ms" }}>
-          <TopConcern f={top} />
-        </section>
-      ) : (
-        <section className="mt-14 husn-rise" style={{ animationDelay: "60ms" }}>
-          <AllClear />
-        </section>
-      )}
+      {/* 1. Organizational Pulse */}
+      <section className="mt-14 husn-rise" style={{ animationDelay: "40ms" }}>
+        <SectionLabel kicker="01" title="Organizational Pulse" />
+        <Pulse confidence={conf} alignment={alig} momentum={mom} risks={risks.length} />
+      </section>
 
-      {/* Rest */}
-      {rest.length > 0 ? (
-        <section className="mt-20 husn-rise" style={{ animationDelay: "120ms" }}>
-          <div className="flex items-baseline justify-between mb-6 max-w-[var(--reading-w)]">
-            <h2 className="husn-title">Also worth knowing</h2>
-            <Link
-              href="/explore"
-              className="text-[13px] font-medium"
-              style={{ color: "var(--muted)" }}
-            >
-              See everything →
-            </Link>
-          </div>
-          <ol className="space-y-2">
-            {rest.slice(0, 8).map((f, idx) => (
-              <li key={f.id}>
-                <EntryRow f={f} index={idx + 2} />
-              </li>
-            ))}
-          </ol>
-        </section>
-      ) : null}
+      {/* 2. Most Consequential Issue */}
+      <section className="mt-20 husn-rise" style={{ animationDelay: "100ms" }}>
+        <SectionLabel kicker="02" title="Most Consequential" />
+        {top ? <ConsequentialIssue f={top} /> : <AllClear />}
+      </section>
 
-      {/* Footer note */}
+      {/* 3. Emerging Risks + 4. Missing Information — side by side editorial columns */}
+      <section className="mt-20 grid grid-cols-1 lg:grid-cols-2 gap-10 husn-rise" style={{ animationDelay: "160ms" }}>
+        <div>
+          <SectionLabel kicker="03" title="Emerging Risks" />
+          <RiskList items={risks} />
+        </div>
+        <div>
+          <SectionLabel kicker="04" title="Missing Information" />
+          <MissingList items={missing} />
+        </div>
+      </section>
+
+      {/* 5. Recommended Actions */}
+      <section className="mt-20 husn-rise" style={{ animationDelay: "220ms" }}>
+        <SectionLabel kicker="05" title="Recommended Actions" />
+        <RecommendedActions findings={findings} />
+      </section>
+
+      {/* 6. Active Projects */}
+      <section className="mt-20 husn-rise" style={{ animationDelay: "280ms" }}>
+        <SectionLabel kicker="06" title="Active Projects" />
+        <ActiveProjects projects={projects} findings={findings} />
+      </section>
+
       <footer className="mt-24 pt-6 border-t" style={{ borderColor: "var(--rule)" }}>
         <p className="husn-meta">
-          Briefing is generated by Husn from the activity in your connected tools.{" "}
+          Husn reads continuously across your tools.{" "}
           <Link href="/ask" style={{ color: "var(--accent)" }} className="font-medium">
-            Ask a question
+            Ask Husn anything
           </Link>{" "}
-          to dig in.
+          to dig deeper.
         </p>
       </footer>
     </main>
   );
 }
 
-/* ---------- Pieces ---------- */
-
-function leadIn(count: number): string {
+function leadIn(count: number, conf: number): string {
   if (count === 0) {
-    return "Nothing is drifting across your tools right now. Husn is still reading — you'll see something here the moment that changes.";
+    return "Across your tools, nothing is drifting. Husn is still reading — you'll see something here the moment that changes.";
   }
-  if (count === 1) {
-    return "One concern is open. It's below, with the evidence to verify it and the actions to move it.";
-  }
-  return `${count} concerns are open. Ranked by impact, not recency. The most consequential is below.`;
+  const c = conf >= 75 ? "calm" : conf >= 50 ? "watchful" : "demanding";
+  return `The picture is ${c}. ${count === 1 ? "One concern is open" : `${count} concerns are open`}, ranked below by what costs the most if ignored — not what came in last.`;
 }
 
-function TopConcern({ f }: { f: Finding }) {
+/* =====================================================
+   Section primitives
+   ===================================================== */
+
+function SectionLabel({ kicker, title }: { kicker: string; title: string }) {
+  return (
+    <div className="flex items-baseline gap-3 mb-5">
+      <span className="tabular text-[11px] font-medium" style={{ color: "var(--muted-2)", letterSpacing: 0.06 }}>
+        {kicker}
+      </span>
+      <h2 className="husn-heading" style={{ fontSize: 22 }}>{title}</h2>
+    </div>
+  );
+}
+
+type SemanticTone = "aligned" | "uncertain" | "conflict" | "predicted" | "understood";
+
+function toneColor(t: SemanticTone): { fill: string; soft: string; line: string; ink: string } {
+  switch (t) {
+    case "aligned": return { fill: "var(--aligned)", soft: "var(--aligned-soft)", line: "var(--aligned-line)", ink: "var(--success-ink)" };
+    case "uncertain": return { fill: "var(--uncertain)", soft: "var(--uncertain-soft)", line: "var(--uncertain-line)", ink: "var(--warning-ink)" };
+    case "conflict": return { fill: "var(--conflict)", soft: "var(--conflict-soft)", line: "var(--conflict-line)", ink: "var(--danger-ink)" };
+    case "predicted": return { fill: "var(--predicted)", soft: "var(--predicted-soft)", line: "var(--predicted-line)", ink: "var(--predicted-ink)" };
+    case "understood": return { fill: "var(--understood)", soft: "var(--understood-soft)", line: "var(--understood-line)", ink: "var(--accent-ink)" };
+  }
+}
+
+function metricTone(v: number): SemanticTone {
+  if (v >= 75) return "aligned";
+  if (v >= 50) return "understood";
+  if (v >= 30) return "uncertain";
+  return "conflict";
+}
+
+/* =====================================================
+   1. Pulse — the living vitals strip.
+   ===================================================== */
+
+function Pulse({
+  confidence: conf,
+  alignment: alig,
+  momentum: mom,
+  risks,
+}: {
+  confidence: number;
+  alignment: number;
+  momentum: { label: string; tone: SemanticTone };
+  risks: number;
+}) {
+  return (
+    <div
+      className="grid grid-cols-2 lg:grid-cols-4 gap-px overflow-hidden rounded-[var(--radius-lg)] border"
+      style={{ background: "var(--rule)", borderColor: "var(--border)" }}
+    >
+      <PulseRing label="Confidence" value={conf} tone={metricTone(conf)} suffix="%" caption={confidenceCaption(conf)} />
+      <PulseRing label="Alignment" value={alig} tone={metricTone(alig)} suffix="%" caption={alignmentCaption(alig)} />
+      <PulseText label="Momentum" value={mom.label} tone={mom.tone} caption={momentumCaption(mom.label)} />
+      <PulseText
+        label="Emerging Risks"
+        value={risks === 0 ? "None" : `${risks} active`}
+        tone={risks === 0 ? "aligned" : risks <= 2 ? "uncertain" : "conflict"}
+        caption={risks === 0 ? "Nothing new in the last 48 hours." : "Surfaced in the last 48 hours."}
+      />
+    </div>
+  );
+}
+
+function confidenceCaption(v: number): string {
+  if (v >= 85) return "The picture is well-supported by every connected source.";
+  if (v >= 60) return "A few open questions, none yet urgent.";
+  if (v >= 35) return "Several open questions are dragging on the picture.";
+  return "Multiple sources disagree. Confidence is constrained until they're reconciled.";
+}
+function alignmentCaption(v: number): string {
+  if (v >= 85) return "Sources agree on the facts that matter.";
+  if (v >= 60) return "Minor disagreements between tools.";
+  if (v >= 35) return "Recurring mismatches across tools.";
+  return "Multiple active conflicts between systems.";
+}
+function momentumCaption(label: string): string {
+  if (label === "accelerating") return "Fresh updates across the org in the last 30 minutes.";
+  if (label === "steady") return "Activity within normal cadence.";
+  if (label === "easing") return "Quieter than usual today.";
+  if (label === "quiet") return "Little activity. Worth checking whether work is happening elsewhere.";
+  return "Husn is still building a baseline.";
+}
+
+function PulseRing({ label, value, tone, suffix, caption }: { label: string; value: number; tone: SemanticTone; suffix?: string; caption: string }) {
+  const c = toneColor(tone);
+  const r = 26;
+  const C = 2 * Math.PI * r;
+  const offset = C * (1 - Math.max(0, Math.min(100, value)) / 100);
+  return (
+    <div className="p-6" style={{ background: "var(--panel)" }}>
+      <p className="husn-eyebrow" style={{ fontSize: 10.5 }}>{label}</p>
+      <div className="mt-4 flex items-center gap-5">
+        <div className="relative shrink-0" style={{ width: 64, height: 64 }}>
+          <svg width="64" height="64" viewBox="0 0 64 64">
+            <circle cx="32" cy="32" r={r} fill="none" stroke="var(--panel-2)" strokeWidth="6" />
+            <circle
+              cx="32"
+              cy="32"
+              r={r}
+              fill="none"
+              stroke={c.fill}
+              strokeWidth="6"
+              strokeLinecap="round"
+              strokeDasharray={C}
+              strokeDashoffset={offset}
+              transform="rotate(-90 32 32)"
+              style={{ transition: "stroke-dashoffset 600ms ease" }}
+            />
+          </svg>
+          <span
+            aria-hidden
+            className="husn-pulse absolute inset-0 m-auto rounded-full"
+            style={{ width: 8, height: 8, background: c.fill, top: 28, left: 28 }}
+          />
+        </div>
+        <div className="min-w-0">
+          <p className="tabular" style={{ fontSize: 32, lineHeight: 1, letterSpacing: "-0.02em", fontWeight: 600, color: c.fill }}>
+            {value}{suffix ?? ""}
+          </p>
+          <p className="mt-2 text-[12.5px] leading-snug" style={{ color: "var(--text-2)", maxWidth: "20ch" }}>{caption}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PulseText({ label, value, tone, caption }: { label: string; value: string; tone: SemanticTone; caption: string }) {
+  const c = toneColor(tone);
+  return (
+    <div className="p-6" style={{ background: "var(--panel)" }}>
+      <p className="husn-eyebrow" style={{ fontSize: 10.5 }}>{label}</p>
+      <div className="mt-4 flex items-center gap-5">
+        <span aria-hidden className="husn-pulse inline-block rounded-full shrink-0" style={{ width: 14, height: 14, background: c.fill, boxShadow: `0 0 0 6px ${c.soft}` }} />
+        <div className="min-w-0">
+          <p className="tabular" style={{ fontSize: 24, lineHeight: 1.1, letterSpacing: "-0.018em", fontWeight: 600, color: c.fill }}>
+            {value}
+          </p>
+          <p className="mt-2 text-[12.5px] leading-snug" style={{ color: "var(--text-2)", maxWidth: "22ch" }}>{caption}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* =====================================================
+   2. Most Consequential Issue — the dominating hero block.
+   ===================================================== */
+
+function ConsequentialIssue({ f }: { f: Finding }) {
+  const c = perFindingConfidence(f);
   const sources = Object.keys(f.details?.per_source ?? {});
+  const people = peopleClosest(f);
+  const impact = impactNarration(f);
+  const ctx = reachOutContext(f);
+  const tone: SemanticTone = f.severity === "high" ? "conflict" : "uncertain";
+  const cc = toneColor(tone);
+
   return (
     <article
-      className="rounded-[var(--radius-xl)] border p-10 lg:p-14"
+      className="relative overflow-hidden rounded-[var(--radius-xl)] border"
       style={{
-        borderColor: "var(--border)",
         background: "var(--panel)",
+        borderColor: cc.line,
         boxShadow: "var(--shadow-md)",
       }}
     >
-      <div className="flex items-center gap-3">
-        <SeverityMark severity={f.severity} />
-        <p className="husn-eyebrow">
-          The top concern · {entryKind(f.rule_id)}
-        </p>
-      </div>
+      {/* tinted gutter on the left as a quiet semantic cue */}
+      <span aria-hidden className="absolute inset-y-0 left-0 w-[5px]" style={{ background: cc.fill }} />
 
-      <h2 className="husn-title mt-6" style={{ fontSize: 36, lineHeight: 1.15, maxWidth: "26ch" }}>
-        {cleanTitle(f)}
-      </h2>
-
-      <p className="husn-prose mt-5 max-w-[62ch]">
-        {longNarration(f)}
-      </p>
-
-      <ValueList values={f.details?.distinct_values ?? []} />
-
-      {sources.length > 0 ? (
-        <div className="mt-6 flex flex-wrap items-center gap-2">
-          {sources.flatMap((src) =>
-            (f.details?.per_source[src] ?? []).slice(0, 2).map((ev, i) => (
-              <EvidenceChip
-                key={`${src}-${i}-${ev.claim_id}`}
-                source={SOURCE_LABEL[src] ?? src}
-                cite={ev.artifact_title ?? `#${ev.artifact_id}`}
-                title={ev.source_anchor.snippet ?? ev.source_anchor.field_path ?? undefined}
-              />
-            )),
-          )}
+      <div className="p-10 lg:p-14">
+        <div className="flex flex-wrap items-center gap-3">
+          <SeverityChip tone={tone} label={entryKind(f.rule_id)} />
+          <span className="husn-meta">Open · {timeAgo(f.opened_at)}</span>
         </div>
-      ) : null}
 
-      <div className="mt-9 flex flex-wrap items-center gap-2.5">
-        <ActionButton href={`/investigations/${f.id}`} primary>
-          Open investigation
-        </ActionButton>
-        {f.rule_id === "R-OWNER-1" ? (
-          <ActionButton href={`/investigations/${f.id}?action=reach-out`}>
-            Reach out
-          </ActionButton>
-        ) : (
-          <ActionButton href={`/investigations/${f.id}?action=ask`}>
-            Ask for an update
-          </ActionButton>
-        )}
-        <ActionButton href={`/investigations/${f.id}?action=collect`} muted>
-          Collect missing information
-        </ActionButton>
+        <h3 className="mt-5" style={{ fontSize: 40, lineHeight: 1.08, letterSpacing: "-0.026em", fontWeight: 600, maxWidth: "20ch" }}>
+          {consequentialTitle(f)}
+        </h3>
+
+        {/* Confidence bar + numeric */}
+        <div className="mt-6 flex items-center gap-4 max-w-[520px]">
+          <p className="husn-eyebrow" style={{ fontSize: 10.5 }}>Confidence</p>
+          <div className="flex-1 rounded-full overflow-hidden" style={{ height: 6, background: "var(--panel-2)" }}>
+            <div
+              className="h-full"
+              style={{
+                width: `${c}%`,
+                background: cc.fill,
+                transition: "width 700ms ease",
+              }}
+            />
+          </div>
+          <p className="tabular" style={{ fontSize: 15, fontWeight: 600, color: cc.fill }}>{c}%</p>
+        </div>
+
+        {/* Narrative */}
+        <p className="husn-prose mt-7 max-w-[64ch]" style={{ fontSize: 17 }}>
+          {consequentialNarration(f)}
+        </p>
+
+        {/* Impact + People — editorial two-column */}
+        <div className="mt-9 grid grid-cols-1 md:grid-cols-2 gap-8">
+          <div>
+            <p className="husn-eyebrow">Potential impact</p>
+            <ul className="mt-3 space-y-1.5 text-[14.5px]" style={{ color: "var(--text-2)" }}>
+              {impact.map((line, i) => (
+                <li key={i} className="flex gap-2"><span aria-hidden style={{ color: "var(--muted-2)" }}>—</span><span>{line}</span></li>
+              ))}
+            </ul>
+          </div>
+          <div>
+            <p className="husn-eyebrow">People closest to resolution</p>
+            <ul className="mt-3 space-y-1.5">
+              {people.length === 0 ? (
+                <li className="text-[14px]" style={{ color: "var(--muted)" }}>Owner unconfirmed — Husn would start by asking the sources below.</li>
+              ) : people.map((p, i) => (
+                <li key={i} className="text-[14.5px]" style={{ color: "var(--text-2)" }}>
+                  <span style={{ color: "var(--text)", fontWeight: 500 }}>{p}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+
+        {/* Sources */}
+        {sources.length > 0 ? (
+          <div className="mt-8 flex flex-wrap items-center gap-2">
+            <p className="husn-eyebrow" style={{ fontSize: 10.5 }}>Sources</p>
+            {sources.flatMap((src) =>
+              (f.details?.per_source[src] ?? []).slice(0, 1).map((ev) => (
+                <SourceChip key={`${src}-${ev.claim_id}`} source={src} cite={ev.artifact_title ?? `#${ev.artifact_id}`} />
+              )),
+            )}
+          </div>
+        ) : null}
+
+        {/* Actions */}
+        <div className="mt-10 flex flex-wrap items-center gap-2.5">
+          <PrimaryAction href={`/investigations/${f.id}`}>Investigate</PrimaryAction>
+          <SecondaryAction href={`/ask?q=${encodeURIComponent("Why is " + cleanTitle(f).toLowerCase() + " happening?")}`}>Ask Husn</SecondaryAction>
+          <ReachOutButton context={ctx} variant="primary">Reach Out For Me</ReachOutButton>
+          <GhostAction href={`/investigations/${f.id}?action=collect`}>Collect missing information</GhostAction>
+        </div>
       </div>
     </article>
   );
 }
 
-function longNarration(f: Finding): string {
+function consequentialTitle(f: Finding): string {
+  // For the hero we want something with weight — frame the consequence, not the symptom.
+  const k = prettyKey(f.details?.key).toLowerCase();
+  if (f.rule_id === "R-DATE-1") return `${prettyKey(f.details?.key)} is no longer agreed across tools.`;
+  if (f.rule_id === "R-STATUS-1") return `${prettyKey(f.details?.key)} is being reported differently.`;
+  if (f.rule_id === "R-OWNER-1") return `Ownership of ${k} is unclear.`;
+  if (f.rule_id.startsWith("AGENT-FINDING-")) return `${cleanTitle(f)} — Husn flagged a pattern.`;
+  return cleanTitle(f);
+}
+
+function consequentialNarration(f: Finding): string {
   const sources = Object.keys(f.details?.per_source ?? {});
   const distinct = f.details?.distinct_values ?? [];
   const opened = timeAgo(f.opened_at);
-  const sourceList = sources.map((s) => SOURCE_LABEL[s] ?? s).join(" and ");
-
-  if (f.rule_id === "R-DATE-1") {
-    if (distinct.length >= 2 && sources.length >= 2) {
-      return `${SOURCE_LABEL[sources[0]] ?? sources[0]} commits to ${distinct[0]}; ${SOURCE_LABEL[sources[1]] ?? sources[1]} cites ${distinct[1]}. Untouched since ${opened}.`;
-    }
-    return `${distinct.length} candidate dates across ${sourceList}. Opened ${opened}.`;
+  if (f.rule_id === "R-DATE-1" && sources.length >= 2 && distinct.length >= 2) {
+    return `${SOURCE_LABEL[sources[0]] ?? sources[0]} commits to ${distinct[0]}. ${SOURCE_LABEL[sources[1]] ?? sources[1]} cites ${distinct[1]}. No one has reconciled the difference since this opened ${opened}; decisions downstream are riding on whichever date the reader happened to see.`;
   }
-  if (f.rule_id === "R-STATUS-1") {
-    if (distinct.length >= 2 && sources.length >= 2) {
-      return `${SOURCE_LABEL[sources[0]] ?? sources[0]} reports "${distinct[0]}"; ${SOURCE_LABEL[sources[1]] ?? sources[1]} reports "${distinct[1]}". Last reconciled ${opened}.`;
-    }
-    return `Status reads differently across ${sourceList}. Opened ${opened}.`;
+  if (f.rule_id === "R-STATUS-1" && sources.length >= 2 && distinct.length >= 2) {
+    return `${SOURCE_LABEL[sources[0]] ?? sources[0]} reports "${distinct[0]}". ${SOURCE_LABEL[sources[1]] ?? sources[1]} reports "${distinct[1]}". The two pictures haven't aligned in ${opened}.`;
   }
   if (f.rule_id === "R-OWNER-1") {
-    return `${distinct.length || "Several"} possible owners across ${sourceList || "the team"}. Opened ${opened}. Decisions downstream are riding on an unconfirmed assumption.`;
+    return `${distinct.length || "Several"} possible owners are showing up across ${sources.map((s) => SOURCE_LABEL[s] ?? s).join(" and ") || "the connected tools"}. Without a confirmed single owner, asks land in different inboxes and nothing closes.`;
   }
-  if (f.rule_id.startsWith("AGENT-FINDING-")) {
-    return `Husn flagged a pattern ${opened}. Evidence is collected below.`;
-  }
-  return `Opened ${opened}. Evidence is below — verify, then resolve.`;
+  return `Surfaced ${opened}. The evidence is below — verify, then resolve.`;
 }
 
-/* Shows the first N distinct values, then a "+ K more" chip backed by native
- * <details> — expands inline with no client JS. */
-function ValueList({
-  values,
-  max = 2,
-  compact = false,
-}: {
-  values: string[];
-  max?: number;
-  compact?: boolean;
-}) {
-  if (!values || values.length === 0) return null;
-  const head = values.slice(0, max);
-  const rest = values.slice(max);
-  const sizeCls = compact ? "text-[13px] mt-3" : "text-[14px] mt-5";
+function impactNarration(f: Finding): string[] {
+  const k = prettyKey(f.details?.key).toLowerCase();
+  if (f.rule_id === "R-DATE-1") return [
+    "Downstream campaigns may be planning against the wrong target.",
+    "Customer commitments could outrun engineering capacity.",
+    "Stakeholders may be quoting different numbers in the same meeting.",
+  ];
+  if (f.rule_id === "R-STATUS-1") return [
+    "Reports up the chain depend on which tool the reader opens.",
+    "Dependencies may be assuming completion that hasn't happened.",
+  ];
+  if (f.rule_id === "R-OWNER-1") return [
+    "Asks land in different inboxes and nothing closes.",
+    "Accountability is diffused; decisions stall.",
+  ];
+  return [`Confidence in ${k || "this area"} is constrained until resolved.`];
+}
 
+/* =====================================================
+   3. Emerging Risks list
+   ===================================================== */
+
+function RiskList({ items }: { items: Finding[] }) {
+  if (items.length === 0) {
+    return (
+      <EditorialEmpty
+        title="No new risks in the last 48 hours."
+        body="Husn keeps watching. You'll see new risks here the moment they surface."
+      />
+    );
+  }
   return (
-    <div className={`${sizeCls} flex flex-wrap items-center gap-x-2 gap-y-1`}>
-      <span className="tabular" style={{ color: "var(--text-2)" }}>
-        {head.join(", ")}
-      </span>
-      {rest.length > 0 ? (
-        <details>
-          <summary
-            className="inline-flex items-center rounded-full border px-2 py-0.5 text-[11.5px] font-medium select-none"
-            style={{
-              borderColor: "var(--border)",
-              background: "var(--panel-2)",
-              color: "var(--muted)",
-            }}
-            title={rest.join(", ")}
-          >
-            and {rest.length} more
-          </summary>
-          <span
-            className="ml-2 tabular"
-            style={{ color: "var(--text-2)" }}
-          >
-            , {rest.join(", ")}
-          </span>
-        </details>
-      ) : null}
-    </div>
+    <ul className="space-y-2">
+      {items.map((f) => {
+        const tone: SemanticTone = f.severity === "high" ? "conflict" : "uncertain";
+        return (
+          <li key={f.id}>
+            <Link
+              href={`/investigations/${f.id}`}
+              className="block rounded-[var(--radius)] border px-5 py-4 husn-lift"
+              style={{ borderColor: "var(--border)", background: "var(--panel)" }}
+            >
+              <div className="flex items-start gap-3">
+                <SeverityDot tone={tone} />
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                    <p className="text-[14.5px] font-medium">{consequentialTitle(f)}</p>
+                  </div>
+                  <p className="mt-1.5 text-[13px] leading-relaxed" style={{ color: "var(--muted)" }}>
+                    {entryKind(f.rule_id)} · {timeAgo(f.opened_at)}
+                  </p>
+                </div>
+                <span aria-hidden className="shrink-0 self-center text-[14px]" style={{ color: "var(--muted)" }}>→</span>
+              </div>
+            </Link>
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
-function SeverityMark({ severity }: { severity: Finding["severity"] }) {
-  const map = {
-    high: { ring: "var(--danger-line)", fill: "var(--danger)", label: "high" },
-    medium: { ring: "var(--warning-line)", fill: "var(--warning)", label: "elevated" },
-    low: { ring: "var(--border-strong)", fill: "var(--muted)", label: "low" },
-  } as const;
-  const s = map[severity];
+/* =====================================================
+   4. Missing Information list — with inline ReachOut
+   ===================================================== */
+
+function MissingList({ items }: { items: Finding[] }) {
+  if (items.length === 0) {
+    return (
+      <EditorialEmpty
+        title="No information gaps."
+        body="Owners are confirmed and Husn isn't missing context that would help it brief you."
+      />
+    );
+  }
+  return (
+    <ul className="space-y-2">
+      {items.map((f) => {
+        const ctx = reachOutContext(f);
+        return (
+          <li
+            key={f.id}
+            className="rounded-[var(--radius)] border px-5 py-4"
+            style={{ borderColor: "var(--predicted-line)", background: "var(--predicted-soft)" }}
+          >
+            <div className="flex items-start gap-3">
+              <span aria-hidden className="mt-1 shrink-0 inline-block rounded-full husn-pulse" style={{ width: 8, height: 8, background: "var(--predicted)" }} />
+              <div className="min-w-0 flex-1">
+                <p className="text-[14.5px] font-medium" style={{ color: "var(--text)" }}>
+                  {missingFraming(f)}
+                </p>
+                <p className="mt-1 text-[13px] leading-relaxed" style={{ color: "var(--text-2)" }}>
+                  {ctx.why}
+                </p>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <ReachOutButton context={ctx} variant="secondary" size="sm">Reach Out For Me</ReachOutButton>
+                  <Link
+                    href={`/investigations/${f.id}`}
+                    className="rounded-full border px-2.5 py-1 text-[12.5px] font-medium"
+                    style={{ borderColor: "var(--border)", background: "var(--panel)", color: "var(--text)" }}
+                  >
+                    See evidence
+                  </Link>
+                </div>
+              </div>
+            </div>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+function missingFraming(f: Finding): string {
+  const k = prettyKey(f.details?.key).toLowerCase();
+  if (f.rule_id === "R-OWNER-1") return `We need a confirmed owner on ${k}.`;
+  if (f.rule_id.startsWith("AGENT-FINDING-")) return cleanTitle(f);
+  return `Husn is missing a clean read on ${k}.`;
+}
+
+/* =====================================================
+   5. Recommended Actions — synthesized to-dos
+   ===================================================== */
+
+function RecommendedActions({ findings }: { findings: Finding[] }) {
+  const items = findings.slice(0, 5).map((f) => ({ f, ...synthesizeAction(f) }));
+  if (items.length === 0) {
+    return (
+      <EditorialEmpty
+        title="Nothing to act on."
+        body="When new risks land, Husn will draft the right next move here."
+      />
+    );
+  }
+  return (
+    <ol className="space-y-2">
+      {items.map(({ f, verb, target, hint }, i) => {
+        const ctx = reachOutContext(f);
+        return (
+          <li
+            key={f.id}
+            className="rounded-[var(--radius)] border px-5 py-4 husn-lift"
+            style={{ borderColor: "var(--border)", background: "var(--panel)" }}
+          >
+            <div className="flex items-start gap-4">
+              <span
+                className="shrink-0 tabular text-[12.5px] font-semibold rounded-full grid place-items-center"
+                style={{ width: 26, height: 26, background: "var(--panel-2)", color: "var(--muted)" }}
+                aria-hidden
+              >
+                {i + 1}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-[15px]" style={{ color: "var(--text)" }}>
+                  <span style={{ fontWeight: 600 }}>{verb}</span> {target}
+                </p>
+                <p className="mt-1 text-[13px]" style={{ color: "var(--muted)" }}>{hint}</p>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <ReachOutButton context={ctx} variant="secondary" size="sm" />
+                  <Link
+                    href={`/investigations/${f.id}`}
+                    className="rounded-full border px-3 py-1 text-[12.5px] font-medium"
+                    style={{ borderColor: "var(--border)", background: "var(--panel-2)", color: "var(--text-2)" }}
+                  >
+                    Investigate
+                  </Link>
+                </div>
+              </div>
+            </div>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+function synthesizeAction(f: Finding): { verb: string; target: string; hint: string } {
+  const k = prettyKey(f.details?.key).toLowerCase();
+  const sources = Object.keys(f.details?.per_source ?? {});
+  const peers = sources.map((s) => SOURCE_LABEL[s] ?? s).join(" and ") || "the team";
+  if (f.rule_id === "R-DATE-1") return {
+    verb: "Reconcile",
+    target: `${k} between ${peers}.`,
+    hint: "Pick one source of truth so downstream plans can settle.",
+  };
+  if (f.rule_id === "R-STATUS-1") return {
+    verb: "Align",
+    target: `status on ${k}.`,
+    hint: "Two systems are telling stakeholders different things.",
+  };
+  if (f.rule_id === "R-OWNER-1") return {
+    verb: "Confirm",
+    target: `the owner of ${k}.`,
+    hint: "Until one name is set, asks land in multiple inboxes.",
+  };
+  return {
+    verb: "Investigate",
+    target: cleanTitle(f).toLowerCase() + ".",
+    hint: "Husn flagged a pattern worth a quick look.",
+  };
+}
+
+/* =====================================================
+   6. Active Projects — strategic, not tabular.
+   ===================================================== */
+
+function ActiveProjects({ projects, findings }: { projects: Project[]; findings: Finding[] }) {
+  if (projects.length === 0) {
+    return (
+      <EditorialEmpty
+        title="No projects mapped yet."
+        body={
+          <>
+            Connect a tool so Husn has somewhere to read from.{" "}
+            <Link href="/connections" style={{ color: "var(--accent)" }} className="font-medium">Open Connections →</Link>
+          </>
+        }
+      />
+    );
+  }
+  return (
+    <ul className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+      {projects.slice(0, 6).map((p) => {
+        // findings don't currently carry project_id — but their evidence often references
+        // it. As a proxy, attribute open findings using artifact_title containing the slug.
+        const related = findings.filter((f) =>
+          Object.values(f.details?.per_source ?? {}).some((arr) =>
+            arr.some((ev) => (ev.artifact_title ?? "").toLowerCase().includes(p.slug.toLowerCase())),
+          ),
+        ).length;
+        const tone: SemanticTone =
+          related === 0 ? "aligned" :
+          related <= 2 ? "uncertain" :
+          "conflict";
+        const cc = toneColor(tone);
+        return (
+          <li key={p.id}>
+            <Link
+              href={`/organization`}
+              className="block rounded-[var(--radius)] border px-5 py-5 husn-lift"
+              style={{ borderColor: "var(--border)", background: "var(--panel)" }}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-[10.5px] font-mono uppercase" style={{ color: "var(--muted-2)", letterSpacing: 0.06 }}>
+                    {p.slug}
+                  </p>
+                  <h3 className="husn-heading mt-1.5" style={{ fontSize: 18 }}>{p.name}</h3>
+                  <p className="mt-2 text-[13px]" style={{ color: "var(--muted)" }}>
+                    {projectStateNarration(related)}
+                  </p>
+                </div>
+                <span aria-hidden className="shrink-0 mt-1 inline-block rounded-full husn-pulse" style={{ width: 10, height: 10, background: cc.fill, boxShadow: `0 0 0 5px ${cc.soft}` }} />
+              </div>
+              <div className="mt-4 flex flex-wrap items-center gap-1.5">
+                {p.scopes.slice(0, 4).map((s, i) => (
+                  <span
+                    key={i}
+                    className="inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 font-mono text-[10.5px]"
+                    style={{ borderColor: "var(--border)", background: "var(--panel-2)", color: "var(--muted)" }}
+                  >
+                    {SOURCE_LABEL[s.source] ?? s.source}
+                  </span>
+                ))}
+              </div>
+            </Link>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+function projectStateNarration(openIssues: number): string {
+  if (openIssues === 0) return "Quiet. Husn is watching this workstream.";
+  if (openIssues === 1) return "One open concern.";
+  return `${openIssues} open concerns — see the Briefing above.`;
+}
+
+/* =====================================================
+   Shared bits
+   ===================================================== */
+
+function SeverityChip({ tone, label }: { tone: SemanticTone; label: string }) {
+  const c = toneColor(tone);
   return (
     <span
       className="inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5"
-      style={{ borderColor: s.ring, background: "var(--panel-2)" }}
+      style={{ borderColor: c.line, background: c.soft }}
     >
-      <span aria-hidden style={{ background: s.fill, width: 6, height: 6, borderRadius: 999, display: "inline-block" }} />
-      <span className="text-[11px] font-medium" style={{ color: s.fill, letterSpacing: 0.04, textTransform: "uppercase" }}>
-        {s.label}
+      <span aria-hidden className="husn-pulse" style={{ background: c.fill, width: 6, height: 6, borderRadius: 999, display: "inline-block" }} />
+      <span className="text-[11px] font-medium uppercase" style={{ color: c.ink, letterSpacing: 0.05 }}>
+        {label}
       </span>
     </span>
   );
 }
 
-function EntryRow({ f, index }: { f: Finding; index: number }) {
-  const sources = Object.keys(f.details?.per_source ?? {});
+function SeverityDot({ tone }: { tone: SemanticTone }) {
+  const c = toneColor(tone);
+  return (
+    <span
+      aria-hidden
+      className="mt-1 inline-block rounded-full shrink-0 husn-pulse"
+      style={{ width: 10, height: 10, background: c.fill, boxShadow: `0 0 0 5px ${c.soft}` }}
+    />
+  );
+}
+
+function SourceChip({ source, cite }: { source: string; cite: string }) {
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 font-mono text-[10.5px]"
+      style={{ borderColor: "var(--border)", background: "var(--panel-2)", color: "var(--muted)" }}
+      title={`${SOURCE_LABEL[source] ?? source} · ${cite}`}
+    >
+      <span style={{ opacity: 0.85 }}>{SOURCE_LABEL[source] ?? source}</span>
+      <span aria-hidden style={{ opacity: 0.4 }}>·</span>
+      <span className="font-medium" style={{ color: "var(--text-2)" }}>{cite}</span>
+    </span>
+  );
+}
+
+function PrimaryAction({ href, children }: { href: string; children: React.ReactNode }) {
   return (
     <Link
-      href={`/investigations/${f.id}`}
-      className="group block rounded-[var(--radius)] border px-6 py-5 husn-lift"
-      style={{ borderColor: "var(--border)", background: "var(--panel)" }}
+      href={href}
+      className="inline-flex items-center gap-1.5 rounded-full border px-4 py-2 text-[13.5px] font-medium"
+      style={{ background: "var(--text)", color: "var(--bg)", borderColor: "var(--text)" }}
     >
-      <div className="flex items-start gap-5">
-        <span
-          className="shrink-0 tabular text-[13px] font-medium pt-1"
-          style={{ color: "var(--muted-2)", width: 22 }}
-          aria-hidden
-        >
-          {String(index).padStart(2, "0")}
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2.5">
-            <p className="husn-eyebrow" style={{ fontSize: 10.5 }}>
-              {entryKind(f.rule_id)}
-            </p>
-            <span aria-hidden style={{ color: "var(--muted-2)" }}>·</span>
-            <p className="husn-meta">Opened {timeAgo(f.opened_at)}</p>
-            <SeverityMark severity={f.severity} />
-          </div>
-          <h3
-            className="husn-heading mt-2.5"
-            style={{ color: "var(--text)", fontSize: 18 }}
-          >
-            {cleanTitle(f)}
-          </h3>
-          <p className="mt-2 text-[14px] leading-relaxed" style={{ color: "var(--text-2)", maxWidth: "60ch" }}>
-            {narration(f)}
-          </p>
-          <ValueList values={f.details?.distinct_values ?? []} compact />
-          {sources.length > 0 ? (
-            <div className="mt-3 flex flex-wrap items-center gap-1.5">
-              {sources.slice(0, 4).map((src) => (
-                <EvidenceChip
-                  key={src}
-                  source={SOURCE_LABEL[src] ?? src}
-                  cite={f.details?.per_source[src]?.[0]?.artifact_title ?? undefined}
-                />
-              ))}
-            </div>
-          ) : null}
-        </div>
-        <span
-          aria-hidden
-          className="shrink-0 self-center text-[15px] transition-transform group-hover:translate-x-0.5"
-          style={{ color: "var(--muted)" }}
-        >
-          →
-        </span>
-      </div>
+      {children}
     </Link>
+  );
+}
+function SecondaryAction({ href, children }: { href: string; children: React.ReactNode }) {
+  return (
+    <Link
+      href={href}
+      className="inline-flex items-center gap-1.5 rounded-full border px-4 py-2 text-[13.5px] font-medium"
+      style={{ background: "var(--panel)", color: "var(--text)", borderColor: "var(--border-strong)" }}
+    >
+      {children}
+    </Link>
+  );
+}
+function GhostAction({ href, children }: { href: string; children: React.ReactNode }) {
+  return (
+    <Link
+      href={href}
+      className="inline-flex items-center gap-1.5 rounded-full px-3 py-2 text-[13px] font-medium"
+      style={{ background: "transparent", color: "var(--muted)" }}
+    >
+      {children}
+    </Link>
+  );
+}
+
+function EditorialEmpty({ title, body }: { title: string; body: React.ReactNode }) {
+  return (
+    <div
+      className="rounded-[var(--radius)] border border-dashed px-6 py-10"
+      style={{ borderColor: "var(--border-strong)", background: "var(--panel-2)" }}
+    >
+      <p className="text-[14.5px] font-medium" style={{ color: "var(--text)" }}>{title}</p>
+      <div className="mt-2 text-[13px] leading-relaxed max-w-[58ch]" style={{ color: "var(--muted)" }}>{body}</div>
+    </div>
   );
 }
 
@@ -461,49 +974,18 @@ function AllClear() {
         boxShadow: "var(--shadow-md)",
       }}
     >
-      <p className="husn-eyebrow">All clear</p>
-      <h2 className="husn-title mt-4" style={{ fontSize: 36, lineHeight: 1.15, maxWidth: "22ch" }}>
-        Nothing is drifting across your tools right now.
-      </h2>
+      <SeverityChip tone="aligned" label="All clear" />
+      <h3 className="mt-5" style={{ fontSize: 36, lineHeight: 1.12, letterSpacing: "-0.024em", fontWeight: 600, maxWidth: "22ch" }}>
+        No active conflicts. The org is in sync.
+      </h3>
       <p className="husn-prose mt-5 max-w-[60ch]">
-        Husn keeps watching. The moment two sources disagree, an owner goes silent,
-        or a status quietly shifts — you'll see it here, with the evidence to act on it.
+        Husn is reading continuously. The moment two sources disagree, an owner goes silent,
+        or a status quietly shifts — it lands here, with the evidence to act on it.
       </p>
       <div className="mt-8 flex flex-wrap gap-2.5">
-        <ActionButton href="/ask" primary>
-          Ask Husn a question
-        </ActionButton>
-        <ActionButton href="/organization">
-          See the organization
-        </ActionButton>
+        <PrimaryAction href="/ask">Ask Husn a question</PrimaryAction>
+        <SecondaryAction href="/organization">See the organization</SecondaryAction>
       </div>
     </article>
-  );
-}
-
-function ActionButton({
-  href,
-  children,
-  primary,
-  muted,
-}: {
-  href: string;
-  children: React.ReactNode;
-  primary?: boolean;
-  muted?: boolean;
-}) {
-  const style: React.CSSProperties = primary
-    ? { background: "var(--text)", color: "var(--bg)", borderColor: "var(--text)" }
-    : muted
-    ? { background: "transparent", color: "var(--muted)", borderColor: "transparent" }
-    : { background: "var(--panel)", color: "var(--text)", borderColor: "var(--border-strong)" };
-  return (
-    <Link
-      href={href}
-      className="inline-flex items-center gap-1.5 rounded-full border px-4 py-2 text-[13.5px] font-medium transition-colors"
-      style={style}
-    >
-      {children}
-    </Link>
   );
 }
