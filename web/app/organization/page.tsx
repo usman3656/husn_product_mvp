@@ -1,42 +1,47 @@
 import Link from "next/link";
 
-import { CriticalPeople, type CriticalPerson } from "@/components/critical-people";
-import { ReachOutButton, type ReachOutContext } from "@/components/reach-out";
-import { WeeklySignal, type SignalDay } from "@/components/weekly-signal";
+import { OrgMatrix, type MatrixEdge, type MatrixPerson, type MatrixProject } from "@/components/org-matrix";
 import { FETCH_INIT } from "@/lib/fetch-init";
 
 /* ============================================================
-   Organization — strategic, actionable, interactive.
+   Organization — the Organizational Digital Twin.
+   Answers: "How does this organization work?"
+
    Sections, in order:
-     1. State of the org (hero, compact pulse)
-     2. Where to focus today (top bottlenecks)
-     3. Workstreams (all, strategic cards)
-     4. Critical Path People (interactive)
-     5. This week's signal (interactive chart)
-     6. Connector health
+     1. Workstreams           (the work the org is doing)
+     2. Organizational Map    (People × Workstreams matrix)
+     3. People in the picture (context, not directory)
+     4. Decision Network      (where decisions live)
+     5. Sources of Truth      (quiet, secondary)
+
+   Tone: editorial, calm, premium. No metric blocks. No counts
+   of "signals". No risk language. This page is not a briefing.
    ============================================================ */
 
 const SERVER_API_URL = process.env.API_URL ?? "http://api:8000";
 
 type Project = {
-  id: number; slug: string; name: string; artifact_count: number;
+  id: number; slug: string; name: string;
   scopes: { source: string; kind: string; id: string }[];
+  artifact_count: number;
 };
 type Person = {
   id: number; primary_name: string | null; primary_email: string | null;
   identities: { source: string; display_name: string | null; email: string | null }[];
 };
+type PeopleProjectEdge = {
+  person_id: number; project_id: number;
+  total: number;
+  dominant_role: "author" | "assignee" | "mention" | "watcher" | string;
+};
 type Finding = {
-  id: number; rule_id: string; severity: "low" | "medium" | "high";
+  id: number; rule_id: string; severity: "low" | "medium" | "high"; status: "open" | "closed" | "snoozed";
   summary: string;
   details: { key: string; distinct_values: string[]; per_source: Record<string, { artifact_title?: string | null }[]> } | null;
-  opened_at: string; closed_at: string | null;
-  status: "open" | "closed" | "snoozed";
+  opened_at: string;
 };
 type ConnectionRow = {
   id: number; source: string; account_label: string | null;
-  token_status: "ok" | "expiring-soon" | "expired" | "expired-no-refresh";
-  last_raw_fetched_at: string | null;
   artifact_count: number;
 };
 
@@ -47,379 +52,351 @@ async function safeFetch<T>(url: string): Promise<T | null> {
 const SOURCE_LABEL: Record<string, string> = { jira: "Jira", slack: "Slack", google: "Google", microsoft: "Microsoft" };
 
 export default async function OrganizationPage() {
-  const [projectsRes, personsRes, openFindingsRes, allFindingsRes, connectionsRes] = await Promise.all([
+  const [projectsRes, personsRes, edgesRes, findingsRes, connectionsRes] = await Promise.all([
     safeFetch<{ projects: Project[] }>(`${SERVER_API_URL}/api/graph/projects`),
     safeFetch<{ persons: Person[] }>(`${SERVER_API_URL}/api/graph/persons?limit=200`),
+    safeFetch<{ items: PeopleProjectEdge[] }>(`${SERVER_API_URL}/api/graph/people-projects`),
     safeFetch<{ items: Finding[] }>(`${SERVER_API_URL}/api/findings?status=open&limit=200`),
-    safeFetch<{ items: Finding[] }>(`${SERVER_API_URL}/api/findings?status=all&limit=400`),
     safeFetch<{ items: ConnectionRow[] }>(`${SERVER_API_URL}/api/connections`),
   ]);
 
   const projects = projectsRes?.projects ?? [];
   const persons = personsRes?.persons ?? [];
-  const open = openFindingsRes?.items ?? [];
-  const all = allFindingsRes?.items ?? [];
+  const edges = edgesRes?.items ?? [];
+  const findings = findingsRes?.items ?? [];
   const connections = connectionsRes?.items ?? [];
-
-  // Per-project strain heuristic: open findings whose evidence titles contain the slug
-  const strainByProject = new Map<number, Finding[]>();
-  for (const p of projects) {
-    const slug = p.slug.toLowerCase();
-    strainByProject.set(p.id, open.filter((f) =>
-      Object.values(f.details?.per_source ?? {}).some((arr) =>
-        arr.some((ev) => (ev.artifact_title ?? "").toLowerCase().includes(slug)),
-      ),
-    ));
-  }
-
-  const bottlenecks = [...projects]
-    .sort((a, b) => (strainByProject.get(b.id)?.length ?? 0) - (strainByProject.get(a.id)?.length ?? 0))
-    .filter((p) => (strainByProject.get(p.id)?.length ?? 0) > 0)
-    .slice(0, 3);
-
-  // Org-level confidence + alignment (compact pulse)
-  const conf = orgConfidence(open);
-  const alig = orgAlignment(open);
 
   return (
     <main className="mx-auto px-6 lg:px-12 pt-12 pb-32" style={{ maxWidth: 1100 }}>
-      {/* 1. State of the org */}
+      {/* Editorial header */}
       <header className="husn-rise" style={{ maxWidth: 760 }}>
         <p className="husn-eyebrow">Organization</p>
-        <h1 className="husn-display mt-4">{stateOfTheOrg(open, projects.length)}</h1>
+        <h1 className="husn-display mt-4">How this organization works.</h1>
         <p className="husn-prose mt-5 max-w-[60ch]">
-          {howWeRead(projects.length, persons.length, open.length)}
+          A living view of the work, the people moving it, the decisions in flight,
+          and how they all connect. This is the digital twin — not today&apos;s briefing,
+          not the inbox.
         </p>
       </header>
 
-      <section className="mt-12 husn-rise" style={{ animationDelay: "40ms" }}>
-        <CompactPulse confidence={conf} alignment={alig} bottlenecks={bottlenecks.length} stale={staleCount(open)} />
-      </section>
-
-      {/* 2. Where to focus today */}
-      <section className="mt-20 husn-rise" style={{ animationDelay: "100ms" }}>
-        <Section kicker="01" title="Where to focus today" />
-        {bottlenecks.length === 0 ? (
+      {/* 1. Workstreams */}
+      <section className="mt-20 husn-rise" style={{ animationDelay: "60ms" }}>
+        <Kicker n="01" title="Workstreams" sub="The work the organization is doing." />
+        {projects.length === 0 ? (
           <Empty
-            title="No workstream is under strain."
-            body="Every project Husn is reading is in alignment right now."
+            title="No workstreams mapped yet."
+            body={<>Connect a tool to give Husn somewhere to read from. <Link href="/connections" style={{ color: "var(--accent)" }} className="font-medium">Open Connections →</Link></>}
           />
         ) : (
-          <ul className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-            {bottlenecks.map((p) => (
-              <li key={p.id}>
-                <BottleneckCard project={p} strain={strainByProject.get(p.id) ?? []} />
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      {/* 3. Workstreams */}
-      <section className="mt-20 husn-rise" style={{ animationDelay: "160ms" }}>
-        <Section kicker="02" title="Workstreams" />
-        {projects.length === 0 ? (
-          <Empty title="No workstreams mapped yet." body={<>Connect a tool to give Husn somewhere to read from. <Link href="/connections" style={{ color: "var(--accent)" }} className="font-medium">Open Connections →</Link></>} />
-        ) : (
-          <ul className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+          <ul className="space-y-3">
             {projects.map((p) => (
               <li key={p.id}>
-                <WorkstreamCard project={p} strain={strainByProject.get(p.id) ?? []} />
+                <WorkstreamBlock
+                  project={p}
+                  people={topPeopleForProject(p.id, persons, edges)}
+                  decisions={decisionsAround(p, findings)}
+                  dependencies={dependenciesAround(p, findings)}
+                />
               </li>
             ))}
           </ul>
         )}
       </section>
 
-      {/* 4. Critical Path People */}
-      <section className="mt-20 husn-rise" style={{ animationDelay: "220ms" }}>
-        <Section kicker="03" title="Critical-Path People" />
-        <p className="husn-prose mb-6 max-w-[60ch]">
-          People appearing across the most workstreams — and named in the open ownership
-          questions Husn hasn't been able to resolve. Open a card to see their identities
-          and reach out.
-        </p>
-        <CriticalPeople people={buildCriticalPeople(persons, open)} />
+      {/* 2. Organizational Map — People × Workstreams */}
+      <section className="mt-20 husn-rise" style={{ animationDelay: "120ms" }}>
+        <Kicker n="02" title="Organizational map" sub="How people connect to the work." />
+        <OrgMatrix
+          people={persons.map((p): MatrixPerson => ({
+            id: p.id,
+            name: p.primary_name ?? p.primary_email ?? `#${p.id}`,
+            email: p.primary_email,
+            initials: initialsOf(p.primary_name ?? p.primary_email ?? `#${p.id}`),
+            identities: p.identities.map((i) => ({ source: i.source })),
+          }))}
+          projects={projects.map((p): MatrixProject => ({ id: p.id, slug: p.slug, name: p.name }))}
+          edges={edges as MatrixEdge[]}
+        />
       </section>
 
-      {/* 5. This week's signal */}
-      <section className="mt-20 husn-rise" style={{ animationDelay: "280ms" }}>
-        <Section kicker="04" title="This week" />
-        <WeeklySignal days={weeklyDays(all)} />
+      {/* 3. People in the picture */}
+      <section className="mt-20 husn-rise" style={{ animationDelay: "180ms" }}>
+        <Kicker n="03" title="People in the picture" sub="Context, not a directory." />
+        <PeopleContext persons={persons} projects={projects} edges={edges} />
       </section>
 
-      {/* 6. Connector Health */}
-      <section className="mt-20 husn-rise" style={{ animationDelay: "340ms" }}>
-        <Section kicker="05" title="Connector health" />
-        <ConnectorHealth connections={connections} />
+      {/* 4. Decision Network */}
+      <section className="mt-20 husn-rise" style={{ animationDelay: "240ms" }}>
+        <Kicker n="04" title="Decision network" sub="Where the choices being made today live." />
+        <DecisionNetwork projects={projects} findings={findings} edges={edges} persons={persons} />
+      </section>
+
+      {/* 5. Sources of Truth (quiet) */}
+      <section className="mt-20 husn-rise" style={{ animationDelay: "300ms" }}>
+        <Kicker n="05" title="Sources of truth" sub="Supporting systems, not the stars." />
+        <SourcesStrip connections={connections} />
       </section>
     </main>
   );
 }
 
 /* =====================================================
-   Section primitive
+   Kicker
    ===================================================== */
 
-function Section({ kicker, title }: { kicker: string; title: string }) {
+function Kicker({ n, title, sub }: { n: string; title: string; sub?: string }) {
   return (
     <div className="flex items-baseline gap-3 mb-5">
-      <span className="tabular text-[11px] font-medium" style={{ color: "var(--muted-2)", letterSpacing: 0.06 }}>{kicker}</span>
-      <h2 className="husn-heading" style={{ fontSize: 22 }}>{title}</h2>
+      <span className="tabular text-[11px] font-medium" style={{ color: "var(--muted-2)", letterSpacing: 0.06 }}>{n}</span>
+      <div>
+        <h2 className="husn-heading" style={{ fontSize: 22 }}>{title}</h2>
+        {sub ? <p className="mt-1 text-[13px]" style={{ color: "var(--muted)" }}>{sub}</p> : null}
+      </div>
     </div>
   );
 }
 
 /* =====================================================
-   Hero text helpers
+   1. Workstream block — editorial, structured.
    ===================================================== */
 
-function stateOfTheOrg(open: Finding[], projectCount: number): string {
-  if (projectCount === 0) return "Your organization, ready to be mapped.";
-  if (open.length === 0) return "Everything Husn is watching is aligned.";
-  const high = open.filter((f) => f.severity === "high").length;
-  if (high >= 1) return `${high === 1 ? "One workstream needs" : `${high} workstreams need`} an answer today.`;
-  return "A few questions are waiting for someone to move them.";
-}
-
-function howWeRead(projects: number, people: number, openCount: number): string {
-  if (projects === 0) return "Connect a tool and Husn will start reading what's actually happening — who owns what, what's slipping, and where the disagreements live.";
-  const strain = openCount === 0 ? "No active strain right now." : `${openCount} active ${openCount === 1 ? "question" : "questions"} below.`;
-  return `Husn is reading ${projects === 1 ? "this workstream" : `${projects} workstreams`} and the ${people} ${people === 1 ? "person" : "people"} moving it. ${strain}`;
-}
-
-/* =====================================================
-   Compact Pulse (no client interactivity — quick read)
-   ===================================================== */
-
-function CompactPulse({
-  confidence: conf,
-  alignment: alig,
-  bottlenecks,
-  stale,
+function WorkstreamBlock({
+  project,
+  people,
+  decisions,
+  dependencies,
 }: {
-  confidence: number;
-  alignment: number;
-  bottlenecks: number;
-  stale: number;
+  project: Project;
+  people: { name: string; role: string }[];
+  decisions: string[];
+  dependencies: string[];
 }) {
   return (
-    <div
-      className="grid grid-cols-2 lg:grid-cols-4 gap-px overflow-hidden rounded-[var(--radius-lg)] border"
-      style={{ background: "var(--rule)", borderColor: "var(--border)" }}
-    >
-      <MiniRing label="Confidence" value={conf} />
-      <MiniRing label="Alignment" value={alig} />
-      <MiniText label="Bottlenecks" value={bottlenecks === 0 ? "None" : String(bottlenecks)} tone={bottlenecks === 0 ? "aligned" : bottlenecks <= 2 ? "uncertain" : "conflict"} />
-      <MiniText label="Stale items" value={stale === 0 ? "None" : String(stale)} tone={stale === 0 ? "aligned" : stale <= 3 ? "uncertain" : "conflict"} />
-    </div>
-  );
-}
-
-function MiniRing({ label, value }: { label: string; value: number }) {
-  const tone = value >= 75 ? "aligned" : value >= 50 ? "understood" : value >= 30 ? "uncertain" : "conflict";
-  const color =
-    tone === "aligned" ? "var(--aligned)" :
-    tone === "understood" ? "var(--understood)" :
-    tone === "uncertain" ? "var(--uncertain)" :
-    "var(--conflict)";
-  const r = 20;
-  const C = 2 * Math.PI * r;
-  const offset = C * (1 - value / 100);
-  return (
-    <div className="p-5 flex items-center gap-4" style={{ background: "var(--panel)" }}>
-      <div className="relative shrink-0" style={{ width: 52, height: 52 }}>
-        <svg width="52" height="52" viewBox="0 0 52 52">
-          <circle cx="26" cy="26" r={r} fill="none" stroke="var(--panel-2)" strokeWidth="5" />
-          <circle cx="26" cy="26" r={r} fill="none" stroke={color} strokeWidth="5" strokeLinecap="round" strokeDasharray={C} strokeDashoffset={offset} transform="rotate(-90 26 26)" />
-        </svg>
-        <span aria-hidden className="husn-pulse absolute inset-0 m-auto rounded-full" style={{ width: 6, height: 6, background: color, top: 23, left: 23 }} />
-      </div>
-      <div>
-        <p className="husn-eyebrow" style={{ fontSize: 10 }}>{label}</p>
-        <p className="mt-1 tabular" style={{ fontSize: 24, fontWeight: 600, letterSpacing: "-0.018em", lineHeight: 1, color }}>
-          {value}%
-        </p>
-      </div>
-    </div>
-  );
-}
-
-function MiniText({ label, value, tone }: { label: string; value: string; tone: "aligned" | "uncertain" | "conflict" }) {
-  const color =
-    tone === "aligned" ? "var(--aligned)" :
-    tone === "uncertain" ? "var(--uncertain)" :
-    "var(--conflict)";
-  const soft =
-    tone === "aligned" ? "var(--aligned-soft)" :
-    tone === "uncertain" ? "var(--uncertain-soft)" :
-    "var(--conflict-soft)";
-  return (
-    <div className="p-5 flex items-center gap-4" style={{ background: "var(--panel)" }}>
-      <span aria-hidden className="husn-pulse inline-block rounded-full shrink-0" style={{ width: 12, height: 12, background: color, boxShadow: `0 0 0 6px ${soft}` }} />
-      <div>
-        <p className="husn-eyebrow" style={{ fontSize: 10 }}>{label}</p>
-        <p className="mt-1 tabular" style={{ fontSize: 22, fontWeight: 600, letterSpacing: "-0.018em", lineHeight: 1.1, color }}>
-          {value}
-        </p>
-      </div>
-    </div>
-  );
-}
-
-/* =====================================================
-   Workstream / Bottleneck cards
-   ===================================================== */
-
-function BottleneckCard({ project, strain }: { project: Project; strain: Finding[] }) {
-  const top = strain.sort((a, b) => sevWeight(b.severity) - sevWeight(a.severity))[0] ?? null;
-  const conf = projectConfidence(strain);
-  const tone = conf >= 70 ? "uncertain" : "conflict";
-  const color = tone === "conflict" ? "var(--conflict)" : "var(--uncertain)";
-
-  const ctx: ReachOutContext | null = top ? {
-    who: "The likely owner",
-    why: `${project.name} has ${strain.length} open ${strain.length === 1 ? "concern" : "concerns"} right now. The most consequential is below.`,
-    about: `${project.name} — ${strain.length} open`,
-    draft: `Hey — saw ${strain.length} open ${strain.length === 1 ? "concern" : "concerns"} on ${project.name}. Could you give me a quick read on where we are? Want to make sure plans are aligned.`,
-    via: "slack",
-  } : null;
-
-  return (
     <article
-      className="h-full flex flex-col justify-between rounded-[var(--radius-lg)] border p-5"
-      style={{ borderColor: color, background: "var(--panel)", boxShadow: "var(--shadow-sm)" }}
+      className="rounded-[var(--radius-lg)] border p-6 lg:p-7"
+      style={{ borderColor: "var(--border)", background: "var(--panel)" }}
     >
-      <div>
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p className="text-[10.5px] font-mono uppercase" style={{ color: "var(--muted-2)", letterSpacing: 0.06 }}>{project.slug}</p>
-            <h3 className="husn-heading mt-1" style={{ fontSize: 18 }}>{project.name}</h3>
-          </div>
-          <span aria-hidden className="husn-pulse inline-block rounded-full shrink-0 mt-1" style={{ width: 12, height: 12, background: color, boxShadow: `0 0 0 5px ${tone === "conflict" ? "var(--conflict-soft)" : "var(--uncertain-soft)"}` }} />
+      <header className="flex items-baseline justify-between gap-4">
+        <div className="min-w-0">
+          <p className="text-[10.5px] font-mono uppercase" style={{ color: "var(--muted-2)", letterSpacing: 0.06 }}>{project.slug}</p>
+          <h3 className="husn-heading mt-1.5" style={{ fontSize: 22 }}>{project.name}</h3>
         </div>
-
-        <div className="mt-4 flex items-center gap-3 max-w-[320px]">
-          <p className="husn-eyebrow" style={{ fontSize: 10 }}>Confidence</p>
-          <div className="flex-1 rounded-full overflow-hidden" style={{ height: 5, background: "var(--panel-2)" }}>
-            <div className="h-full" style={{ width: `${conf}%`, background: color }} />
-          </div>
-          <p className="tabular" style={{ fontSize: 13, fontWeight: 600, color }}>{conf}%</p>
-        </div>
-
-        <p className="mt-4 text-[13.5px] leading-relaxed" style={{ color: "var(--text-2)" }}>
-          {strain.length} open · {kindBreakdown(strain)}.
+        <p className="husn-meta shrink-0">
+          {project.scopes.length} {project.scopes.length === 1 ? "surface" : "surfaces"}
         </p>
-        {top ? (
-          <p className="mt-2 text-[12.5px]" style={{ color: "var(--muted)" }}>
-            Top concern: <span style={{ color: "var(--text)", fontWeight: 500 }}>{cleanTitle(top)}</span>
-          </p>
-        ) : null}
-      </div>
+      </header>
 
-      <div className="mt-4 flex flex-wrap items-center gap-2">
-        <Link
-          href={`/explore?lens=risks`}
-          className="rounded-full border px-3 py-1.5 text-[12.5px] font-medium"
-          style={{ borderColor: "var(--border-strong)", background: "var(--panel)", color: "var(--text)" }}
-        >
-          Investigate
-        </Link>
-        {ctx ? <ReachOutButton context={ctx} variant="secondary" size="sm" /> : null}
+      <div className="mt-6 grid grid-cols-1 lg:grid-cols-4 gap-5">
+        <ColumnLabel label="Owners" empty="Owner unconfirmed">
+          {people.filter((p) => p.role === "author" || p.role === "assignee").slice(0, 3).map((p, i) => (
+            <PersonLine key={i} name={p.name} role={p.role} />
+          ))}
+        </ColumnLabel>
+
+        <ColumnLabel label="Teams involved" empty="—">
+          {teamLines(project, people).map((t, i) => (
+            <li key={i} className="text-[13.5px]" style={{ color: "var(--text-2)" }}>{t}</li>
+          ))}
+        </ColumnLabel>
+
+        <ColumnLabel label="Dependencies" empty="None visible">
+          {dependencies.length === 0 ? null : dependencies.slice(0, 3).map((d, i) => (
+            <li key={i} className="text-[13.5px]" style={{ color: "var(--text-2)" }}>{d}</li>
+          ))}
+        </ColumnLabel>
+
+        <ColumnLabel label="Connected decisions" empty="No decisions surfaced yet">
+          {decisions.length === 0 ? null : decisions.slice(0, 3).map((d, i) => (
+            <li key={i} className="text-[13.5px]" style={{ color: "var(--text-2)" }}>{d}</li>
+          ))}
+        </ColumnLabel>
       </div>
     </article>
   );
 }
 
-function WorkstreamCard({ project, strain }: { project: Project; strain: Finding[] }) {
-  const conf = projectConfidence(strain);
-  const tone =
-    strain.length === 0 ? "aligned" :
-    strain.length <= 2 ? "uncertain" :
-    "conflict";
-  const color =
-    tone === "aligned" ? "var(--aligned)" :
-    tone === "uncertain" ? "var(--uncertain)" :
-    "var(--conflict)";
-  const soft =
-    tone === "aligned" ? "var(--aligned-soft)" :
-    tone === "uncertain" ? "var(--uncertain-soft)" :
-    "var(--conflict-soft)";
-
+function ColumnLabel({ label, empty, children }: { label: string; empty: string; children: React.ReactNode }) {
+  const has = Array.isArray(children) ? children.length > 0 : !!children;
   return (
-    <Link
-      href={`/explore?lens=projects`}
-      className="block h-full rounded-[var(--radius)] border px-5 py-5 husn-lift"
-      style={{ borderColor: "var(--border)", background: "var(--panel)" }}
-    >
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-[10.5px] font-mono uppercase" style={{ color: "var(--muted-2)", letterSpacing: 0.06 }}>{project.slug}</p>
-          <h3 className="husn-heading mt-1" style={{ fontSize: 18 }}>{project.name}</h3>
-          <p className="mt-2 text-[13.5px]" style={{ color: "var(--muted)" }}>
-            {strain.length === 0 ? "No active concerns." : `${strain.length} open · ${kindBreakdown(strain)}`}
-          </p>
-        </div>
-        <span aria-hidden className="husn-pulse inline-block rounded-full shrink-0 mt-1" style={{ width: 11, height: 11, background: color, boxShadow: `0 0 0 5px ${soft}` }} />
-      </div>
-
-      <div className="mt-4 flex items-center gap-3 max-w-[260px]">
-        <p className="husn-eyebrow" style={{ fontSize: 10 }}>Conf</p>
-        <div className="flex-1 rounded-full overflow-hidden" style={{ height: 4, background: "var(--panel-2)" }}>
-          <div className="h-full" style={{ width: `${conf}%`, background: color }} />
-        </div>
-        <p className="tabular" style={{ fontSize: 12, fontWeight: 600, color }}>{conf}%</p>
-      </div>
-
-      <div className="mt-4 flex flex-wrap items-center gap-1.5">
-        {project.scopes.slice(0, 4).map((s, i) => (
-          <span key={i} className="inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 font-mono text-[10.5px]" style={{ borderColor: "var(--border)", background: "var(--panel-2)", color: "var(--muted)" }}>
-            <span>{SOURCE_LABEL[s.source] ?? s.source}</span>
-            <span aria-hidden style={{ opacity: 0.4 }}>·</span>
-            <span className="font-medium" style={{ color: "var(--text-2)" }}>{s.id}</span>
-          </span>
-        ))}
-      </div>
-    </Link>
+    <div>
+      <p className="husn-eyebrow" style={{ fontSize: 10.5 }}>{label}</p>
+      {has ? (
+        <ul className="mt-3 space-y-1.5">{children}</ul>
+      ) : (
+        <p className="mt-3 text-[13px]" style={{ color: "var(--muted)" }}>{empty}</p>
+      )}
+    </div>
   );
 }
 
+function PersonLine({ name, role }: { name: string; role: string }) {
+  return (
+    <li className="flex items-center gap-2">
+      <span
+        aria-hidden
+        className="grid h-6 w-6 place-items-center rounded-full text-[10px] font-semibold shrink-0"
+        style={{ background: "var(--panel-2)", color: "var(--text)", border: "1px solid var(--border)" }}
+      >
+        {initialsOf(name)}
+      </span>
+      <span className="text-[13.5px] font-medium truncate" style={{ color: "var(--text)" }}>{name}</span>
+      <span className="text-[11.5px]" style={{ color: "var(--muted)" }}>· {prettyRole(role)}</span>
+    </li>
+  );
+}
+
+function teamLines(project: Project, people: { name: string; role: string }[]): string[] {
+  // Use the sources of truth as a proxy for teams ("Engineering" via Jira,
+  // "Conversation" via Slack, etc. — but we keep the language source-led,
+  // since we don't have first-class team data yet.
+  const teams = new Set<string>();
+  for (const s of project.scopes) teams.add(SOURCE_LABEL[s.source] ?? s.source);
+  // Add a count of contributors as the last "team" line if we have any.
+  const lines = [...teams].map((t) => `${t} surface`);
+  if (people.length > 0) lines.push(`${people.length} ${people.length === 1 ? "contributor" : "contributors"} active`);
+  return lines;
+}
+
+function prettyRole(role: string): string {
+  if (role === "author") return "Author";
+  if (role === "assignee") return "Assignee";
+  if (role === "watcher") return "Watching";
+  if (role === "mention") return "Mentioned";
+  return role;
+}
+
+function topPeopleForProject(projectId: number, persons: Person[], edges: PeopleProjectEdge[]): { name: string; role: string }[] {
+  const relevant = edges.filter((e) => e.project_id === projectId).sort((a, b) => b.total - a.total).slice(0, 6);
+  return relevant.flatMap((e) => {
+    const p = persons.find((x) => x.id === e.person_id);
+    if (!p) return [];
+    return [{ name: p.primary_name ?? p.primary_email ?? `#${p.id}`, role: e.dominant_role }];
+  });
+}
+
+function decisionsAround(project: Project, findings: Finding[]): string[] {
+  // We don't have first-class decisions yet; surface as "decisions in flight"
+  // anything that looks like a status / commitment change that touches this project.
+  const slug = project.slug.toLowerCase();
+  const inFlight = findings
+    .filter((f) => f.rule_id === "R-STATUS-1")
+    .filter((f) =>
+      Object.values(f.details?.per_source ?? {}).some((arr) =>
+        arr.some((ev) => (ev.artifact_title ?? "").toLowerCase().includes(slug)),
+      ),
+    );
+  return inFlight.slice(0, 3).map((f) => decisionPhrase(f));
+}
+
+function dependenciesAround(project: Project, findings: Finding[]): string[] {
+  const slug = project.slug.toLowerCase();
+  const deps = findings
+    .filter((f) => f.rule_id.startsWith("R-DEP-"))
+    .filter((f) =>
+      Object.values(f.details?.per_source ?? {}).some((arr) =>
+        arr.some((ev) => (ev.artifact_title ?? "").toLowerCase().includes(slug)),
+      ),
+    );
+  return deps.slice(0, 3).map((f) => f.summary.split(":")[0].split(" (")[0].trim());
+}
+
+function decisionPhrase(f: Finding): string {
+  const k = prettyKey(f.details?.key);
+  if (f.rule_id === "R-STATUS-1") return `${k} — being decided across sources`;
+  if (f.rule_id === "R-DATE-1") return `${k} — date being settled`;
+  return f.summary.split(":")[0].split(" (")[0].trim();
+}
+
+function prettyKey(key?: string | null): string {
+  if (!key) return "this";
+  const last = key.split("/").pop() || key;
+  return last.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
+}
+
+function initialsOf(name: string): string {
+  return (name.match(/\b[\p{L}\p{N}]/gu) || []).slice(0, 2).join("").toUpperCase() || "·";
+}
+
 /* =====================================================
-   Connector Health
+   3. People in the picture — editorial cards, no directory.
    ===================================================== */
 
-function ConnectorHealth({ connections }: { connections: ConnectionRow[] }) {
-  if (connections.length === 0) {
+function PeopleContext({
+  persons,
+  projects,
+  edges,
+}: {
+  persons: Person[];
+  projects: Project[];
+  edges: PeopleProjectEdge[];
+}) {
+  // For each person, derive a single editorial line ("Touches 3 workstreams",
+  // "Owns 2 dependencies", etc.) from edges. Show top 12 by total touches.
+  const projectMap = new Map(projects.map((p) => [p.id, p]));
+
+  type Card = { p: Person; line: string; workstreams: string[]; total: number };
+
+  const cards: Card[] = persons
+    .map((p): Card => {
+      const myEdges = edges.filter((e) => e.person_id === p.id && projectMap.has(e.project_id));
+      const ws = myEdges
+        .map((e) => projectMap.get(e.project_id)?.name)
+        .filter((x): x is string => !!x);
+      const total = myEdges.reduce((acc, e) => acc + e.total, 0);
+      const owns = myEdges.filter((e) => e.dominant_role === "author" || e.dominant_role === "assignee").length;
+      const mentions = myEdges.filter((e) => e.dominant_role === "mention").length;
+
+      let line = "";
+      if (ws.length === 0) line = "Not yet placed in any workstream.";
+      else if (owns >= 2) line = `Owns work across ${owns} workstreams.`;
+      else if (owns === 1) line = `Owns work on ${projectMap.get(myEdges.find((e) => e.dominant_role === "author" || e.dominant_role === "assignee")!.project_id)?.name ?? "a workstream"}.`;
+      else if (ws.length === 1) line = `Active on ${ws[0]}.`;
+      else if (mentions >= 2) line = `Referenced across ${ws.length} workstreams.`;
+      else line = `Touches ${ws.length} workstreams.`;
+
+      return { p, line, workstreams: ws.slice(0, 3), total };
+    })
+    .filter((c) => c.total > 0)
+    .sort((a, b) => b.total - a.total)
+    .slice(0, 12);
+
+  if (cards.length === 0) {
     return (
-      <Empty title="No connectors yet." body={<>Connect a source from <Link href="/connections" style={{ color: "var(--accent)" }} className="font-medium">Connections →</Link></>} />
+      <Empty
+        title="No one is in the picture yet."
+        body="People appear here as Husn reads activity and resolves them across tools."
+      />
     );
   }
+
   return (
-    <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-      {connections.map((c) => {
-        const tone =
-          c.token_status === "ok" ? "aligned" :
-          c.token_status === "expiring-soon" ? "uncertain" :
-          "conflict";
-        const color = tone === "aligned" ? "var(--aligned)" : tone === "uncertain" ? "var(--uncertain)" : "var(--conflict)";
-        const soft = tone === "aligned" ? "var(--aligned-soft)" : tone === "uncertain" ? "var(--uncertain-soft)" : "var(--conflict-soft)";
+    <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+      {cards.map((c) => {
+        const name = c.p.primary_name ?? c.p.primary_email ?? `#${c.p.id}`;
         return (
-          <li key={c.id}>
-            <Link
-              href="/connections"
-              className="block rounded-[var(--radius)] border px-4 py-4 husn-lift"
-              style={{ borderColor: "var(--border)", background: "var(--panel)" }}
-            >
-              <div className="flex items-center gap-3">
-                <span aria-hidden className="husn-pulse inline-block rounded-full shrink-0" style={{ width: 10, height: 10, background: color, boxShadow: `0 0 0 5px ${soft}` }} />
-                <div className="min-w-0 flex-1">
-                  <p className="text-[14px] font-medium truncate">{SOURCE_LABEL[c.source] ?? c.source}</p>
-                  <p className="text-[11.5px] truncate" style={{ color: "var(--muted)" }}>
-                    {c.account_label || c.source} · last sync {timeAgo(c.last_raw_fetched_at)}
+          <li
+            key={c.p.id}
+            className="rounded-[var(--radius)] border p-5"
+            style={{ borderColor: "var(--border)", background: "var(--panel)" }}
+          >
+            <div className="flex items-start gap-3">
+              <span
+                aria-hidden
+                className="grid h-9 w-9 place-items-center rounded-full text-[12px] font-semibold shrink-0"
+                style={{ background: "var(--panel-2)", color: "var(--text)", border: "1px solid var(--border)" }}
+              >
+                {initialsOf(name)}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-[14.5px] font-medium" style={{ color: "var(--text)" }}>{name}</p>
+                <p className="mt-1 text-[13px] leading-relaxed" style={{ color: "var(--text-2)" }}>{c.line}</p>
+                {c.workstreams.length > 0 ? (
+                  <p className="mt-1.5 truncate text-[11.5px]" style={{ color: "var(--muted)" }}>
+                    {c.workstreams.join(" · ")}
                   </p>
-                </div>
+                ) : null}
               </div>
-            </Link>
+            </div>
           </li>
         );
       })}
@@ -427,143 +404,147 @@ function ConnectorHealth({ connections }: { connections: ConnectionRow[] }) {
   );
 }
 
-function Empty({ title, body }: { title: string; body: React.ReactNode }) {
+/* =====================================================
+   4. Decision Network — where decisions live + who influences.
+   ===================================================== */
+
+function DecisionNetwork({
+  projects,
+  findings,
+  edges,
+  persons,
+}: {
+  projects: Project[];
+  findings: Finding[];
+  edges: PeopleProjectEdge[];
+  persons: Person[];
+}) {
+  // Today's first-class signal closest to "a decision being made" =
+  // status/scope/dependency claims that have ambiguity (R-STATUS-1, R-DEP-*, agent commitments).
+  // We surface up to ~6 ongoing decisions, each with the project they belong to and
+  // the people most likely influencing them.
+  const decisions = findings.filter(
+    (f) => f.rule_id === "R-STATUS-1" || f.rule_id.startsWith("R-DEP-") || f.rule_id.startsWith("AGENT-FINDING-")
+  ).slice(0, 6);
+
+  if (decisions.length === 0) {
+    return (
+      <Empty
+        title="No decisions in flight right now."
+        body="Husn surfaces decisions as it sees status shifts, dependencies forming, and commitments being made across your tools. This view will grow as deterministic rules expand."
+      />
+    );
+  }
+
   return (
-    <div className="rounded-[var(--radius)] border border-dashed px-6 py-10" style={{ borderColor: "var(--border-strong)", background: "var(--panel-2)" }}>
-      <p className="text-[14.5px] font-medium">{title}</p>
-      <div className="mt-2 text-[13px] leading-relaxed max-w-[58ch]" style={{ color: "var(--muted)" }}>{body}</div>
+    <ul className="space-y-3">
+      {decisions.map((f) => {
+        const proj = guessProjectFor(f, projects);
+        const influencers = proj ? topPeopleForProject(proj.id, persons, edges).slice(0, 3) : [];
+        return (
+          <li
+            key={f.id}
+            className="rounded-[var(--radius)] border p-5"
+            style={{ borderColor: "var(--border)", background: "var(--panel)" }}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <p className="husn-eyebrow" style={{ fontSize: 10.5 }}>
+                  {f.rule_id === "R-STATUS-1" ? "Status being decided"
+                    : f.rule_id.startsWith("R-DEP-") ? "Dependency in motion"
+                    : "Pattern flagged"}
+                </p>
+                <h4 className="mt-1.5 text-[16px] font-medium" style={{ color: "var(--text)" }}>
+                  {decisionPhrase(f)}
+                </h4>
+                {proj ? (
+                  <p className="mt-1 text-[12.5px]" style={{ color: "var(--muted)" }}>
+                    Lives in {proj.name}.
+                  </p>
+                ) : null}
+              </div>
+              {influencers.length > 0 ? (
+                <div className="shrink-0">
+                  <p className="husn-eyebrow" style={{ fontSize: 10 }}>Influence</p>
+                  <div className="mt-1.5 flex -space-x-1.5">
+                    {influencers.map((p, i) => (
+                      <span
+                        key={i}
+                        title={p.name}
+                        aria-label={p.name}
+                        className="grid h-7 w-7 place-items-center rounded-full text-[10px] font-semibold"
+                        style={{ background: "var(--panel-2)", color: "var(--text)", border: "1px solid var(--panel)" }}
+                      >
+                        {initialsOf(p.name)}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+function guessProjectFor(f: Finding, projects: Project[]): Project | null {
+  const titles = Object.values(f.details?.per_source ?? {}).flatMap((arr) =>
+    arr.map((ev) => (ev.artifact_title ?? "").toLowerCase()),
+  );
+  for (const p of projects) {
+    if (titles.some((t) => t.includes(p.slug.toLowerCase()))) return p;
+  }
+  return null;
+}
+
+/* =====================================================
+   5. Sources of Truth — quiet, secondary
+   ===================================================== */
+
+function SourcesStrip({ connections }: { connections: ConnectionRow[] }) {
+  if (connections.length === 0) {
+    return (
+      <Empty
+        title="No supporting systems connected yet."
+        body={<>Connect a source from <Link href="/connections" style={{ color: "var(--accent)" }} className="font-medium">Connections →</Link></>}
+      />
+    );
+  }
+  return (
+    <div className="flex flex-wrap gap-2">
+      {connections.map((c) => (
+        <Link
+          key={c.id}
+          href="/connections"
+          className="rounded-full border px-3 py-1.5 text-[12.5px] font-medium"
+          style={{
+            borderColor: "var(--border)",
+            background: "var(--panel-2)",
+            color: "var(--muted)",
+          }}
+        >
+          {SOURCE_LABEL[c.source] ?? c.source}
+          {c.account_label ? <span style={{ color: "var(--muted-2)" }}> · {c.account_label}</span> : null}
+        </Link>
+      ))}
     </div>
   );
 }
 
 /* =====================================================
-   Pure helpers
+   Empty primitive
    ===================================================== */
 
-const SEV = { high: 12, medium: 5, low: 1 } as const;
-function sevWeight(s: "high" | "medium" | "low"): number { return SEV[s]; }
-
-function orgConfidence(open: Finding[]): number {
-  const w = open.reduce((acc, f) => acc + SEV[f.severity], 0);
-  return Math.max(0, Math.min(100, 100 - w));
-}
-function orgAlignment(open: Finding[]): number {
-  const drift = open.filter((f) => f.rule_id === "R-DATE-1" || f.rule_id === "R-STATUS-1").length;
-  return Math.max(0, Math.min(100, 100 - drift * 9));
-}
-function staleCount(open: Finding[]): number {
-  const cut = Date.now() - 14 * 86400 * 1000;
-  return open.filter((f) => Date.parse(f.opened_at) < cut).length;
-}
-function projectConfidence(strain: Finding[]): number {
-  const w = strain.reduce((acc, f) => acc + SEV[f.severity], 0);
-  return Math.max(0, Math.min(100, 100 - w * 1.4));
-}
-function kindBreakdown(strain: Finding[]): string {
-  const kinds = new Set(strain.map((f) => f.rule_id));
-  const parts: string[] = [];
-  if (kinds.has("R-DATE-1")) parts.push("date conflicts");
-  if (kinds.has("R-STATUS-1")) parts.push("status drift");
-  if (kinds.has("R-OWNER-1")) parts.push("ownership gaps");
-  if ([...kinds].some((k) => k.startsWith("R-DEP-"))) parts.push("dependencies");
-  if ([...kinds].some((k) => k.startsWith("AGENT-FINDING-"))) parts.push("patterns");
-  return parts.length ? parts.join(", ") : "concerns";
-}
-function prettyKey(key?: string | null): string {
-  if (!key) return "this";
-  const last = key.split("/").pop() || key;
-  return last.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
-}
-function cleanTitle(f: Finding): string {
-  const k = prettyKey(f.details?.key);
-  if (f.rule_id === "R-DATE-1") return `${k} conflict`;
-  if (f.rule_id === "R-STATUS-1") return `${k} drift`;
-  if (f.rule_id === "R-OWNER-1") return `${k} unclear`;
-  return f.summary.split(":")[0].split(" (")[0].trim() || "Concern";
-}
-function timeAgo(iso: string | null): string {
-  if (!iso) return "never";
-  const t = Date.parse(iso);
-  if (!Number.isFinite(t)) return "never";
-  const s = Math.max(0, Math.floor((Date.now() - t) / 1000));
-  if (s < 60) return `${s}s ago`;
-  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
-  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
-  return `${Math.floor(s / 86400)}d ago`;
-}
-
-function buildCriticalPeople(persons: Person[], openFindings: Finding[]): CriticalPerson[] {
-  // ownershipLoad: count of R-OWNER-1 findings whose distinct_values mentions
-  // this person's name or email.
-  const ownerFindings = openFindings.filter((f) => f.rule_id === "R-OWNER-1");
-
-  return persons.map((p): CriticalPerson => {
-    const name = p.primary_name ?? p.primary_email ?? `#${p.id}`;
-    const initials = (name.match(/\b[\p{L}\p{N}]/gu) || []).slice(0, 2).join("").toUpperCase() || "·";
-
-    const candidates = [name.toLowerCase(), (p.primary_email ?? "").toLowerCase()].filter(Boolean);
-    const ownershipLoad = ownerFindings.filter((f) =>
-      (f.details?.distinct_values ?? []).some((v) =>
-        candidates.some((c) => c && v.toLowerCase().includes(c)),
-      ),
-    ).length;
-
-    const tools = p.identities.map((i) => SOURCE_LABEL[i.source] ?? i.source);
-    const touches = tools.length === 0
-      ? "Identity resolved across no tools yet."
-      : `Active across ${tools.slice(0, 3).join(", ")}${tools.length > 3 ? ` and ${tools.length - 3} more` : ""}.`;
-
-    return {
-      id: p.id,
-      name,
-      email: p.primary_email,
-      initials,
-      identities: p.identities,
-      ownershipLoad,
-      touches,
-    };
-  });
-}
-
-function weeklyDays(allFindings: Finding[]): SignalDay[] {
-  const days: SignalDay[] = [];
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
-  for (let i = 6; i >= 0; i--) {
-    const day = new Date(today);
-    day.setDate(today.getDate() - i);
-    const yyyy = day.getFullYear();
-    const mm = String(day.getMonth() + 1).padStart(2, "0");
-    const dd = String(day.getDate()).padStart(2, "0");
-    const iso = `${yyyy}-${mm}-${dd}`;
-    const dayLabel = day.toLocaleDateString(undefined, { weekday: "short" });
-    days.push({ date: iso, opened: 0, closed: 0, dayLabel });
-  }
-
-  for (const f of allFindings) {
-    const tOpen = Date.parse(f.opened_at);
-    if (Number.isFinite(tOpen)) {
-      const idx = dayIdx(tOpen, today);
-      if (idx >= 0 && idx < days.length) days[idx].opened += 1;
-    }
-    if (f.closed_at) {
-      const tClose = Date.parse(f.closed_at);
-      if (Number.isFinite(tClose)) {
-        const idx = dayIdx(tClose, today);
-        if (idx >= 0 && idx < days.length) days[idx].closed += 1;
-      }
-    }
-  }
-
-  return days;
-}
-
-function dayIdx(t: number, today: Date): number {
-  const d = new Date(t);
-  d.setHours(0, 0, 0, 0);
-  const dayMs = 86400 * 1000;
-  const diff = Math.floor((d.getTime() - today.getTime()) / dayMs);
-  // today is index 6, yesterday 5, ... 6 days ago = 0
-  return 6 + diff;
+function Empty({ title, body }: { title: string; body: React.ReactNode }) {
+  return (
+    <div
+      className="rounded-[var(--radius)] border border-dashed px-6 py-10"
+      style={{ borderColor: "var(--border-strong)", background: "var(--panel-2)" }}
+    >
+      <p className="text-[14.5px] font-medium">{title}</p>
+      <div className="mt-2 text-[13px] leading-relaxed max-w-[58ch]" style={{ color: "var(--muted)" }}>{body}</div>
+    </div>
+  );
 }

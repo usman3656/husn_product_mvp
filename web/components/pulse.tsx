@@ -159,7 +159,6 @@ function Ring({ value, tone, delay }: { value: number; tone: SemanticTone; delay
     const dur = 900;
     const tick = (t: number) => {
       const tt = Math.max(0, Math.min(1, (t - start) / dur));
-      // ease-out cubic
       const eased = 1 - Math.pow(1 - tt, 3);
       setDraw(eased * value);
       if (tt < 1) raf = requestAnimationFrame(tick);
@@ -179,8 +178,16 @@ function Ring({ value, tone, delay }: { value: number; tone: SemanticTone; delay
             <stop offset="0%" stopColor={c.fill} stopOpacity="0.55" />
             <stop offset="100%" stopColor={c.fill} stopOpacity="1" />
           </linearGradient>
+          <radialGradient id={`${gradId}-comet`}>
+            <stop offset="0%" stopColor={c.fill} stopOpacity="1" />
+            <stop offset="100%" stopColor={c.fill} stopOpacity="0" />
+          </radialGradient>
         </defs>
+
+        {/* Backplate ring */}
         <circle cx="32" cy="32" r={r} fill="none" stroke="var(--panel-2)" strokeWidth="6" />
+
+        {/* Value arc — drawn on mount, then gently breathes */}
         <circle
           cx="32"
           cy="32"
@@ -192,8 +199,17 @@ function Ring({ value, tone, delay }: { value: number; tone: SemanticTone; delay
           strokeDasharray={C}
           strokeDashoffset={offset}
           transform="rotate(-90 32 32)"
+          className="husn-breath"
         />
+
+        {/* Continuous comet — keeps the ring alive */}
+        <g className="husn-orbit">
+          <circle cx="32" cy="6" r="3.5" fill={`url(#${gradId}-comet)`} opacity="0.9" />
+          <circle cx="32" cy="6" r="1.5" fill={c.fill} opacity="1" />
+        </g>
       </svg>
+
+      {/* Soft center heartbeat */}
       <span
         aria-hidden
         className="husn-pulse absolute inset-0 m-auto rounded-full"

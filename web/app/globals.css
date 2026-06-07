@@ -337,6 +337,21 @@ details > summary::-webkit-details-marker { display: none; }
     animation: husn-shimmer 2.8s ease-in-out infinite;
     pointer-events: none;
   }
+
+  /* Slow orbit — used on Pulse rings to keep them alive continuously. */
+  @keyframes husn-orbit {
+    from { transform: rotate(-90deg); }
+    to   { transform: rotate(270deg); }
+  }
+  .husn-orbit { transform-origin: 50% 50%; animation: husn-orbit 8s linear infinite; }
+  .husn-orbit-fast { transform-origin: 50% 50%; animation: husn-orbit 5s linear infinite; }
+
+  /* Gentle stroke-width breath on the ring itself. */
+  @keyframes husn-breath {
+    0%, 100% { stroke-opacity: 1; filter: drop-shadow(0 0 0 transparent); }
+    50%      { stroke-opacity: 0.85; }
+  }
+  .husn-breath { animation: husn-breath 4s ease-in-out infinite; }
 }
 
 /* SemanticTone helpers — map name → color */

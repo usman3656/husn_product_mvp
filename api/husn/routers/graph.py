@@ -86,6 +86,59 @@ async def list_projects(session: AsyncSession = Depends(get_session)) -> dict[st
     return {"projects": out}
 
 
+@router.get("/people-projects")
+async def people_projects_matrix(
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Person × Project involvement matrix.
+
+    Joins ArtifactMention → Artifact and counts (person_id, project_id, kind)
+    occurrences. Roles are folded into "any" plus the dominant kind (author /
+    assignee / mention / watcher) for that pair.
+
+    Used by the Organization page's editorial People × Workstreams matrix
+    so we never need to draw a graph.
+    """
+    stmt = (
+        select(
+            ArtifactMention.person_id,
+            Artifact.project_id,
+            ArtifactMention.kind,
+            func.count().label("c"),
+        )
+        .join(Artifact, Artifact.id == ArtifactMention.artifact_id)
+        .where(Artifact.project_id.is_not(None))
+        .group_by(ArtifactMention.person_id, Artifact.project_id, ArtifactMention.kind)
+    )
+    rows = (await session.execute(stmt)).all()
+
+    # Roll up per (person, project) into a dominant role + total count.
+    bucket: dict[tuple[int, int], dict[str, Any]] = {}
+    for r in rows:
+        key = (r.person_id, r.project_id)
+        b = bucket.setdefault(key, {"person_id": r.person_id, "project_id": r.project_id, "total": 0, "kinds": {}})
+        b["total"] += r.c
+        b["kinds"][r.kind] = b["kinds"].get(r.kind, 0) + r.c
+
+    items = []
+    for entry in bucket.values():
+        kinds = entry["kinds"]
+        # Dominant role: author > assignee > watcher > mention (preference order
+        # so owners surface ahead of casual mentions).
+        order = ["author", "assignee", "watcher", "mention"]
+        dominant = sorted(kinds.items(), key=lambda kv: (order.index(kv[0]) if kv[0] in order else 99, -kv[1]))[0][0]
+        items.append(
+            {
+                "person_id": entry["person_id"],
+                "project_id": entry["project_id"],
+                "total": entry["total"],
+                "dominant_role": dominant,
+            }
+        )
+
+    return {"count": len(items), "items": items}
+
+
 @router.get("/persons")
 async def list_persons(
     limit: int = 100, session: AsyncSession = Depends(get_session)
