@@ -93,7 +93,7 @@ async def callback(
             extra={"bot_user_id": bot_user_id, "team": team, "raw": token},
         )
         .on_conflict_do_update(
-            constraint="uq_connection_source_account",
+            constraint="uq_connection_tenant_source_account",
             set_={
                 "tenant_id": tenant_id,
                 "access_token": bot_token,

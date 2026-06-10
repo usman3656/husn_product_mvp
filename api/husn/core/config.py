@@ -92,6 +92,10 @@ class Settings(BaseSettings):
     # sending (local-dev affordance).
     resend_api_key: str = ""
     resend_from: str = "Husn <login@husn.io>"
+    # Secret URL token for the Atlassian personal-data reporting endpoints.
+    # Registered as part of the URL in the Atlassian dev console. Blank = check
+    # disabled (dev / pre-cutover bridge).
+    atlassian_reporting_token: str = ""
 
     # --- Derived helpers -------------------------------------------------
 

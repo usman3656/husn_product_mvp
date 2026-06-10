@@ -20,6 +20,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from husn.db.models import Project, ProjectSource, RawArtifact
+from husn.graph.tenancy_context import current_tenant_id
 
 DEFAULT_PROJECT_SLUG = "all-work"
 DEFAULT_PROJECT_NAME = "All work"
@@ -118,14 +119,24 @@ async def auto_scope_from_raw_artifacts(
 async def resolve_project_for(
     session: AsyncSession, *, source: str, scope_kind: str, scope_id: str
 ) -> int | None:
-    """Given a (source, scope_kind, scope_id), return the project_id it maps to."""
+    """Given a (source, scope_kind, scope_id), return the project_id it maps to.
+
+    Tenant-scoped via the normalize ContextVar: two tenants can both attach
+    the same Slack channel id (post-0010 the unique constraint is per-project)
+    — each must resolve to THEIR project. Returns the first match in bridge
+    mode for backwards compatibility.
+    """
     if not scope_id:
         return None
-    result = await session.execute(
-        select(ProjectSource.project_id).where(
-            ProjectSource.source == source,
-            ProjectSource.scope_kind == scope_kind,
-            ProjectSource.scope_id == scope_id,
-        )
+    tenant_id = current_tenant_id.get()
+    q = select(ProjectSource.project_id).where(
+        ProjectSource.source == source,
+        ProjectSource.scope_kind == scope_kind,
+        ProjectSource.scope_id == scope_id,
     )
+    if tenant_id is not None:
+        q = q.join(Project, Project.id == ProjectSource.project_id).where(
+            Project.tenant_id == tenant_id
+        )
+    result = await session.execute(q.limit(1))
     return result.scalar_one_or_none()

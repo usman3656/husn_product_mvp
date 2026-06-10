@@ -7,25 +7,29 @@ Atlassian can call to (a) report what we hold for a given list of accountIds,
 and (b) delete it. These routes are those two endpoints.
 
 URLs to register in the Atlassian developer console under Settings > Personal
-Data:
-  Reporting URL:  https://api.husn.io/api/atlassian/personal-data/report
-  Deletion URL:   https://api.husn.io/api/atlassian/personal-data/delete
+Data (include the secret token query param — see below):
+  Reporting URL:  https://api.husn.io/api/atlassian/personal-data/report?token=<ATLASSIAN_REPORTING_TOKEN>
+  Deletion URL:   https://api.husn.io/api/atlassian/personal-data/delete?token=<ATLASSIAN_REPORTING_TOKEN>
 
-# PROD-AUDIT: Atlassian authenticates these calls with a JWT bearer token in
-# the Authorization header signed by their public key. We currently accept all
-# callers. Add JWT verification (per
-# https://developer.atlassian.com/cloud/jira/platform/personal-data-reporting/)
-# before any real customer is onboarded.
+Auth: a secret URL token (env ATLASSIAN_REPORTING_TOKEN) registered as part of
+the URL in the Atlassian console — bearer-token-equivalent, since only
+Atlassian ever sees the registered URL. Constant-time compared. Blank token in
+env = check disabled (local dev / pre-cutover bridge, where the registered
+URLs don't carry the token yet). Full JWT verification per
+https://developer.atlassian.com/cloud/jira/platform/personal-data-reporting/
+is the Stage-2 upgrade.
 """
 
+import hmac
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from husn.core.config import get_settings
 from husn.core.logging import log
 from husn.db.models import PersonIdentity
 from husn.db.session import get_session
@@ -34,6 +38,15 @@ router = APIRouter(prefix="/api/atlassian/personal-data", tags=["atlassian-perso
 
 SOURCE_JIRA = "jira"
 MAX_ACCOUNT_IDS_PER_REQUEST = 90
+
+
+def check_reporting_token(token: str | None = Query(None)) -> None:
+    """Reject callers without the secret URL token, when one is configured."""
+    expected = get_settings().atlassian_reporting_token
+    if not expected:
+        return  # not configured — bridge/dev behavior unchanged
+    if token is None or not hmac.compare_digest(token, expected):
+        raise HTTPException(403, "invalid reporting token")
 
 
 class PersonalDataRequest(BaseModel):
@@ -62,6 +75,7 @@ class PersonalDataDeleteResponse(BaseModel):
 async def report_personal_data(
     body: PersonalDataRequest,
     session: AsyncSession = Depends(get_session),
+    _: None = Depends(check_reporting_token),
 ) -> PersonalDataReportResponse:
     """Return whether we hold personal data for each requested Jira accountId.
 
@@ -114,6 +128,7 @@ async def report_personal_data(
 async def delete_personal_data(
     body: PersonalDataRequest,
     session: AsyncSession = Depends(get_session),
+    _: None = Depends(check_reporting_token),
 ) -> PersonalDataDeleteResponse:
     """Anonymize PersonIdentity rows for the requested Jira accountIds.
 

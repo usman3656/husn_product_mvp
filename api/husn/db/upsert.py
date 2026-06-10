@@ -47,7 +47,7 @@ async def upsert_raw_artifact(
             payload=payload,
         )
         .on_conflict_do_update(
-            constraint="uq_raw_artifact_source_extid_ver",
+            constraint="uq_raw_artifact_tenant_source_extid_ver",
             set_={"content_hash": h, "payload": payload, "tenant_id": tenant_id},
         )
         .returning(RawArtifact.id)

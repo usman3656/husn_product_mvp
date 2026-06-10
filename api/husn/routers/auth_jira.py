@@ -116,7 +116,7 @@ async def callback(
                 extra={"site_url": site_url, "cloud_id": cloud_id, "raw_resource": r},
             )
             .on_conflict_do_update(
-                constraint="uq_connection_source_account",
+                constraint="uq_connection_tenant_source_account",
                 set_={
                     "tenant_id": tenant_id,
                     "access_token": access_token,

@@ -143,7 +143,11 @@ class RawArtifact(Base):
     )
 
     __table_args__ = (
-        UniqueConstraint("source", "external_id", "version", name="uq_raw_artifact_source_extid_ver"),
+        # Re-keyed per-tenant in migration 0010 (C4 cutover).
+        UniqueConstraint(
+            "tenant_id", "source", "external_id", "version",
+            name="uq_raw_artifact_tenant_source_extid_ver",
+        ),
         Index("ix_raw_artifact_source_kind", "source", "kind"),
         Index("ix_raw_artifact_fetched_at", "fetched_at"),
     )
@@ -182,7 +186,10 @@ class Connection(Base):
     )
 
     __table_args__ = (
-        UniqueConstraint("source", "account_id", name="uq_connection_source_account"),
+        # Re-keyed per-tenant in migration 0010 (C4 cutover).
+        UniqueConstraint(
+            "tenant_id", "source", "account_id", name="uq_connection_tenant_source_account"
+        ),
     )
 
 
@@ -228,7 +235,10 @@ class PersonIdentity(Base):
     )
 
     __table_args__ = (
-        UniqueConstraint("source", "source_user_id", name="uq_identity_source_user"),
+        # Re-keyed per-tenant in migration 0010 (C4 cutover).
+        UniqueConstraint(
+            "tenant_id", "source", "source_user_id", name="uq_identity_tenant_source_user"
+        ),
     )
 
 
@@ -241,15 +251,18 @@ class Project(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     tenant_id: Mapped[int | None] = mapped_column(BigInteger, index=True)  # NOT NULL at C4
-    # NOTE: slug uniqueness becomes per-tenant at C4 (migration 0010 re-keys
-    # the unique constraint to (tenant_id, slug)).
-    slug: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    # Slug uniqueness is per-tenant since migration 0010 (C4 cutover).
+    slug: Mapped[str] = mapped_column(String(64), nullable=False)
     name: Mapped[str] = mapped_column(String(256), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "slug", name="uq_project_tenant_slug"),
     )
 
 
@@ -270,8 +283,11 @@ class ProjectSource(Base):
     )
 
     __table_args__ = (
+        # Since migration 0010 the scope key includes project_id, so two
+        # tenants' projects can both attach the same Slack channel / Jira key.
+        # Name kept stable — four ON CONFLICT callers reference it.
         UniqueConstraint(
-            "source", "scope_kind", "scope_id", name="uq_project_source_scope"
+            "project_id", "source", "scope_kind", "scope_id", name="uq_project_source_scope"
         ),
     )
 
@@ -399,7 +415,11 @@ class ClaimGroup(Base):
     )
 
     __table_args__ = (
-        UniqueConstraint("project_id", "kind", "key", name="uq_claim_group_project_kind_key"),
+        # Re-keyed per-tenant in migration 0010 (C4 cutover).
+        UniqueConstraint(
+            "tenant_id", "project_id", "kind", "key",
+            name="uq_claim_group_tenant_project_kind_key",
+        ),
     )
 
 

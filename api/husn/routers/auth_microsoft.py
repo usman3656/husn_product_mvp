@@ -119,7 +119,7 @@ async def callback(
             extra={"upn": upn, "display_name": display_name, "me": me},
         )
         .on_conflict_do_update(
-            constraint="uq_connection_source_account",
+            constraint="uq_connection_tenant_source_account",
             set_={
                 "tenant_id": tenant_id,
                 "access_token": access_token,
