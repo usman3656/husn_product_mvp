@@ -1,12 +1,14 @@
 # OAuth production setup — husn.io
 
-Step-by-step checklist for updating production OAuth registration and callback
-URLs for the four providers, plus the order to do them in.
+Step-by-step checklist for switching each provider's OAuth registration to the production callback URL pattern, plus the order to do them in.
+
+> **Status (2026-06-10).** Backend, callback infrastructure, and placeholder routes are all live. The four OAuth consoles still hold the localhost-dev callbacks — this doc is the checklist for the founder-side console work that flips them to prod.
 
 Callback pattern: `https://api.husn.io/auth/<provider>/callback`
 App URL: `https://app.husn.io`
-Privacy URL: `https://husn.io/privacy` (placeholder page until lawyer review)
-Terms URL: `https://husn.io/terms` (placeholder)
+Privacy URL: `https://app.husn.io/privacy` (placeholder page until lawyer review)
+Terms URL: `https://app.husn.io/terms` (placeholder)
+Subprocessors URL: `https://app.husn.io/subprocessors` (placeholder)
 
 ---
 
@@ -79,8 +81,8 @@ Terms URL: `https://husn.io/terms` (placeholder)
    - App logo: 120 × 120 PNG
    - App home: `https://app.husn.io`
    - Authorized domains: `husn.io`
-   - Privacy: `https://husn.io/privacy`
-   - Terms: `https://husn.io/terms`
+   - Privacy: `https://app.husn.io/privacy`
+   - Terms: `https://app.husn.io/terms`
 4. Scopes (from `docs/google-setup.md`): `openid email profile`,
    `https://www.googleapis.com/auth/gmail.readonly`,
    `https://www.googleapis.com/auth/drive.readonly`. Both are restricted.
@@ -139,7 +141,7 @@ Terms URL: `https://husn.io/terms` (placeholder)
 
 - `https://api.husn.io/auth/<provider>/callback` reachable over TLS, cert valid.
 - `https://app.husn.io` reachable.
-- `https://husn.io/privacy` and `https://husn.io/terms` placeholder pages live
+- `https://app.husn.io/privacy` and `https://app.husn.io/terms` placeholder pages live
   (Google and Microsoft both reject 404s on branding screens).
 - OAuth correspondence inbox monitored (suggest `oauth@husn.io` → Bawani).
 - DNS TXT verification ready for Microsoft Publisher Domain + Google

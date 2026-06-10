@@ -213,6 +213,11 @@ Sales cycle: 90–120 days enterprise + 30–60 day security review = ~5 months 
 13. **Per-tenant LLM fine-tuning is a liability surface, not a feature (added 2026-05-24).** Under EDPB Jan-2025 guidance, fine-tuned weights are personal-data derivatives; GDPR Art 17 erasure requires a documented procedure or full retrain. LoRA-Leak (USENIX '25) shows membership inference is *easier* against LoRA adapters than full fine-tunes — the adapter delta concentrates the private signal. BetrVG §87(1) no.6 makes per-tenant trained models on employee utterances a German works-council deal-blocker; EU AI Act Annex III (Aug 2026) likely captures any system "materially influencing decisions about employees." Tier-2 LoRA is opt-in / DPIA-gated only.
 14. **Clarification-driven learning has insider-threat exposure unique to this product (added 2026-05-24).** When an ambiguity resolver asks "did Sarah mean A or B?", the clarifier is *authoritative by design* — but may be a junior dev who missed a deadline rewriting their own commitment edge. Wikipedia-scale vandalism defences (low quorum, post-hoc revert) do not apply here. Mitigation: two-track writes (fact updates immediately; pattern/training promotion gated on quorum + conflict-of-interest filter + Dawid-Skene reliability score). See §11.D.
 
+15. **LLM provider rate limits are a UX problem, not just an infra one (added 2026-06-10).** Hit on production within days of going live: the Groq free tier daily token cap on `llama-3.3-70b-versatile` (~100K/day per key) is exhausted by the cron renderer (5 personas × N projects × 30-min cadence) within a few hours. After exhaustion, the same key 429s on chat for the rest of the UTC day. Three implications baked into Wave 1 Stage 2:
+    - **Single 429 cannot bubble to the UI.** Retry-with-`Retry-After` in `husn.agent.llm.GroqClient`; surface a calm "Husn is briefly rate-limited" UI state, never the raw HTTP error.
+    - **Cron and chat must be on separate budgets.** Either two API keys, or two providers (chat → Anthropic, cron → Groq), or one provider with a token bucket that yields to interactive callers. They are not equivalent workloads: chat is latency-sensitive and small; cron is throughput-sensitive and predictable.
+    - **Model choice is a runway lever.** `llama-3.1-8b-instant` has a much higher daily ceiling on the same key, at a small quality cost on the typewriter role (renderer, not skeleton — so the cost is bounded). Worth the swap before paying for Dev tier.
+
 ---
 
 ## 11. Architecture Decisions (added 2026-05-24)
@@ -268,6 +273,18 @@ When the user clarifies an ambiguity:
 ### E. Cost target
 
 The structured-first architecture aims for **~$300–600/tenant/mo all-in** (5,000-employee tenant, 50 personas, daily briefs) vs. naive-RAG's ~$3,300/mo. At blended $75K ACV that's a 1–2% COGS floor before interactive chat usage, vs. 10–20% for naive RAG.
+
+### F. Product surface model (added 2026-06-07)
+
+**The frontend has its own load-bearing architecture, not just visual design.** Three commitments after Wave 1 Stage 1 frontend repositioning:
+
+1. **Briefing IS the product.** The homepage is a memo, not a dashboard. It answers a single user question: "what needs my attention today?" Six named sections ranked by **consequence** (severity × proximity to a deliverable), never by recency. The Most Consequential Issue dominates visually — not a card, a hero. No metric blocks. No widgets. No notification feed. Editorial type scale, restrained semantic colour.
+2. **Organization IS the digital twin.** Architecturally separated from Briefing so the two never compete for the same attention. Organization answers a structurally different question: "how does this organization work?" That makes its surfaces (Workstreams, People × Workstreams matrix, Decision network) about *understanding*, not *triage*. The two pages literally cannot be merged — they would teach the user opposite mental models.
+3. **Reach Out For Me is a primary affordance, not a feature.** Wherever Husn surfaces uncertainty, one-click outreach is offered: who likely has the answer + why + pre-drafted message + Send. This is what closes the trust loop. The brief tells you what's wrong; Reach Out For Me lets you act on it inside Husn instead of switching tabs. Without it, the product is a smarter Jira; with it, the product is a chief of staff. Tinted predicted-purple to signal derived information.
+
+**Semantic colour vocabulary (load-bearing).** Green = aligned, Amber = uncertain, Red = active conflict, Purple = predicted, Blue = understood. Used only where meaning is encoded; never decorative. This vocabulary is referenced across Pulse, Risk chips, Prediction chips, status dots, and is the reason Husn never looks like a "rainbow dashboard".
+
+**Why this matters.** The product brief was *organizational intelligence layer*, not *integration platform*. The shape of the UI either reinforces or undermines that. Counts of artifacts / signals / mentions implicitly tell the user "this is a database UI"; editorial sentences and consequence-ranked memos implicitly tell the user "this is a chief of staff briefing me". Same data, opposite framing.
 
 ---
 

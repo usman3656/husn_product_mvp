@@ -1,4 +1,4 @@
-# husn.io — PROGRESS
+# husn — PROGRESS
 
 > Living state log. Read this file first at the start of every Claude session to know where we are. Updated after every meaningful code change and every commit.
 
@@ -8,14 +8,14 @@
 
 | Field | Value |
 |---|---|
-| Last commit on `main` | `bf6ffe1` — web healthcheck uses GET (final fix that brought Wave 0 deploy up healthy) |
+| Last commit on `main` | `6d859f0` — Organization page redesign + alive Pulse rings |
 | **Live URL** | `https://app.husn.io` (Wave 0, single-tenant). API at `https://api.husn.io`. Apex `husn.io` still serves the existing marketing site. |
-| Production host | Hetzner CX32 (Falkenstein, Ubuntu 24.04, 178.105.157.152). Stack: `docker compose -f docker-compose.prod.yml` → caddy + web + api + worker + postgres + redis. |
-| Current step in flight | **Wave 0 follow-ups** — register prod OAuth callbacks at each provider per `docs/oauth-production.md`, ship placeholder `/privacy` + `/terms` pages, start Google CASA submission. Then **Wave 1** (tenant signup + Auth.js + Stripe + Step 6 v2 agent rewrite). See `DEPLOY.md`. |
-| Phase within Step 6 v2 | v1 (single-call LLM-direct-from-dossier) shipped as checkpoint; v2 rewrite is part of Wave 1, not yet started. |
-| LLM backend | Groq `llama-3.3-70b-versatile` chosen for the v2 renderer. `GROQ_API_KEY` is blank in `.env.prod` on the box until we wire it; agent runs no-op until set. |
-| Services up? | `docker compose -f docker-compose.prod.yml --env-file .env.prod ps` — six containers, all healthy. |
-| Static GitHub Pages demo | **Torn down.** `gh-pages` branch still exists on the remote; can be deleted from repo settings now that the live app is up. |
+| Production host | Hetzner CX32 (Falkenstein, Ubuntu 24.04, 178.105.157.152). Stack: `docker compose -f docker-compose.prod.yml` → caddy + web + api + worker + postgres + redis. Worker on `edge + internal` networks (egress fix). |
+| Auto-deploy | Cron polls `origin/main` every 2 min and runs `scripts/deploy.sh` if new commits. `husn-deploy` Mac wrapper triggers a manual redeploy. |
+| Phase in flight | **Wave 1 Stage 1 — shipped.** Step 5/6 v2 agent (skeleton → renderer → NLI verifier → template fallback) + drift framework expansion (R-OWNER-1, R-STATUS-1) + 3 new extractors (scope, dependency, commitment) all live. **Frontend redesigned end-to-end** as the organizational intelligence layer (Briefing, Ask Husn, Explore, Organization digital twin, Investigations, Connections, Settings, theme toggle). |
+| Next | **Wave 1 Stage 2 — tenancy + Auth.js + Stripe + worker LLM resilience.** Plus operational items: register prod OAuth callbacks per `docs/oauth-production.md`; address Groq daily token cap exhaustion (model swap or paid tier). |
+| LLM backend | Groq `llama-3.3-70b-versatile` for the renderer + chat. Anthropic Haiku for NLI verifier (JSON mode). `GROQ_API_KEY` + `ANTHROPIC_API_KEY` both set in `.env.prod`. **Known limit:** free-tier daily token cap (~100K/day on 70B model) gets exhausted by the cron renderer; needs paid tier OR `llama-3.1-8b-instant` swap. |
+| Services up? | `ssh husn 'cd ~/husn && ./scripts/diag.sh'` — six containers, all healthy. |
 
 ---
 
@@ -23,96 +23,122 @@
 
 | Step | Status | Notes |
 |---|---|---|
-| **Wave 0 — Production deploy** | 🟡 live, follow-ups pending | App is reachable at `https://app.husn.io`, API at `https://api.husn.io`. Hetzner CX32 + docker-compose + Caddy + Let's Encrypt all green. **Still pending in Wave 0:** register prod OAuth callbacks (Jira, Slack, Google, Microsoft) per `docs/oauth-production.md`; ship placeholder `/privacy` + `/terms` pages (required by Google + Microsoft OAuth branding screens); start Google CASA submission (6-8 week long pole). |
-| **1 — Connectors** | ✅ shipped (4 of 4 sources) | Jira (3LO OAuth), Slack (OAuth v2 bot install), Google (Gmail + Drive + Docs + Sheets, allowlist UI, delta sync), **Microsoft (Outlook + OneDrive incl. shared/remoteItem folders, per-folder delta sync, content extraction for .html / .csv / .txt / .docx / .xlsx)**. Per-panel disconnect buttons on all four. |
-| **2 — Operational graph** | ✅ shipped | persons, person_identities, projects, project_sources, artifacts, artifact_mentions. Continuous sync via Arq cron. Email identities resolved by lowercase email address; mention writes use `ON CONFLICT DO NOTHING`. |
-| **3 — Claims (deterministic)** | 🟡 partial — Slack + Jira only | 7 extractors with evidence anchors fire on Slack messages + Jira issues. Google email / doc / sheet content is normalized but **no extractors run on it yet** (would need ~3 new extractor classes; trivial work but not yet shipped). |
-| **4 — Drift (deterministic)** | 🟡 partial — kept | R-DATE-1 shipped + Drift inbox UI. Remaining rules (R-DATE-2, R-DECISION-1, R-OWNER-1) + auto-close **skipped per 2026-05-24 pivot**. R-DATE-1 stays as always-on fallback. |
-| **5 — Propagation** | ⛔ subsumed | Folded into Step 6. Agent will decide who needs to know. |
-| **6 — AI TPM agent (brief skeleton + LLM-as-typewriter)** | 🟡 v1 shipped, v2 pending | **v1 (single-call LLM-direct-from-dossier) is live.** Produces 2 findings + 4 briefs in ~2s on Groq Llama 3.3 70B; citation validator catches hallucinated claim_ids. **v2 rewrite is next:** deterministic skeleton builder → Anthropic renderer → NLI verifier → deterministic-template fallback. See `## What's next`. |
-| **6.chat — Interactive Q&A (RAG, aligned with v2)** | ✅ shipped | `/chat` page with session sidebar; client-side fetch; assistant turns cite `[claim N]` / `[artifact N]` chips; per-question RAG retrieval via Postgres ILIKE keyword search across artifacts.title+body, deduped against a recency floor. Working end-to-end against Project Atlas. |
-| **7 — Feedback loop (clarifications + two-track writes)** | 📋 planned | Repurposed slot. Track A fact-writes immediate; Track B pattern promotions gated on quorum + COI + Dawid-Skene reliability. **Also bundled into Step 7: full file-type coverage** — see the dedicated row below. |
-| **7.files — Full file-type coverage (read ALL formats, full content)** | 📋 planned | Today's gaps: (a) **.pptx** (PowerPoint) — both OneDrive and Google Slides — needs `python-pptx` + Slides API path; (b) **PDF** — needs `pypdf` or similar, applies to OneDrive PDFs and Google Drive PDFs; (c) **Google Sheets full content** — currently capped at 50 rows/tab × all sheets, lift to full; (d) **OneDrive .xlsx full content** — same 50-row cap, lift to full; (e) other formats encountered in real customer data (.rtf, .odt, .pages, .keynote, archived .zip). One unified `content_extractor` module callable from both Google + Microsoft backfills. |
-| **8 — Tiered learning (Tier 0 dict only in MVP)** | 📋 planned | Tier 0 alias dictionary. Tier 1 (few-shot) deferred; Tier 2 (LoRA) opt-in / DPIA-only, out of MVP. |
-| **Connections management** | ✅ shipped | `/connections` page lists every source connection with token health, scope count, artifact count, last-sync time. Disconnect wipes the token + allowlist but keeps historical data. |
-| **Audit watcher** | ✅ shipped | Host-side Python daemon polls the project tree every 4s and runs `.claude/audit.sh` on changes. Survives terminal close, not reboot. |
+| **Wave 0 — Production deploy** | ✅ shipped | App live at `https://app.husn.io`. Hetzner + docker compose + Caddy + Let's Encrypt all green. Auto-deploy from `origin/main` via cron. |
+| **1 — Connectors** | ✅ shipped (4/4) | Jira (3LO), Slack (OAuth v2), Google (Gmail + Drive + Docs + Sheets, delta sync), Microsoft (Outlook + OneDrive incl. shared folders, .html/.csv/.txt/.docx/.xlsx content extraction). Per-connection disconnect + reset-sync endpoints. **Per-file read status** surfaced via `/api/connections/{id}/files`. |
+| **2 — Operational graph** | ✅ shipped | persons, person_identities, projects, project_sources, artifacts, artifact_mentions. Continuous Arq cron sync. Identity resolution via email lowercase. **People × Project matrix** exposed via `/api/graph/people-projects`. |
+| **3 — Claims (deterministic)** | ✅ shipped | Original 7 extractors on Slack + Jira, plus 3 new extractors (scope, dependency, commitment) added in Wave 1 Stage 1. Google + Microsoft normalization done; extractors on those sources still pending (claim path runs only on Slack + Jira artifacts today). |
+| **4 — Drift (deterministic)** | ✅ shipped — generalised | Table-driven `DriftRule` Protocol framework. Three rules live: **R-DATE-1** (date conflict), **R-OWNER-1** (ownership ambiguity), **R-STATUS-1** (status drift across sources). Cron `evaluate_drift` runs every 30 min; one finding per `(rule_id, claim_group_id)`. |
+| **5 — Propagation** | ⛔ subsumed | Folded into Step 6 v2. Renderer + the "Reach Out For Me" UI affordance decides who needs to know. |
+| **6 — Step 5/6 v2 agent (skeleton + typewriter + NLI verifier)** | ✅ shipped — Wave 1 Stage 1 | `husn.agent.skeleton.build_skeleton()` (pure deterministic), `husn.agent.render` (Groq Llama 3.3 70B as constrained renderer with strict typewriter prompt + sanitiser + template fallback), `husn.agent.nli` (Haiku JSON-mode entailment check, default-fail-closed), orchestrated by `husn.agent.run_v2.run_renderer_for_*`. Five personas: TPM, Eng Manager, QA Lead, Security Lead, Ops Manager. Dashboard surfaces persona tabs + side-by-side conflict cards. |
+| **6.chat — Ask Husn** | ✅ shipped (UX redesigned) | `/ask` (was `/chat`, redirect kept) — document-style conversation with Conclusion / Evidence / next-step structure. Citations as Source #N / Fact #N footnote chips. Per-question RAG over Postgres ILIKE keyword search. |
+| **7 — Feedback loop (clarifications + two-track writes)** | 📋 planned (Wave 1 Stage 2+) | Schema in `plan.md` Step 7. Not started. |
+| **7.files — Full file-type coverage** | 📋 planned | .pptx, PDF, full-sheet content, .rtf / .odt / .pages / .keynote. Not started. |
+| **8 — Tier 0 alias dictionary** | 📋 planned | Not started. |
+| **Connections management** | ✅ shipped (revamped) | `/connections` lists every connection with token health, last-sync time, **expandable per-connection file list** (read / fetched status per file). Disconnect + reset-sync + reset-sync-all. |
+| **Frontend redesign (intelligence layer)** | ✅ shipped — Wave 1 Stage 1 | See "Frontend surface" below. |
+| **Theme system** | ✅ shipped | Light / Auto / Dark toggle in side-nav. `data-theme` attribute + no-FOUC inline boot script + 200 ms color transitions. |
+| **Auto-deploy** | ✅ shipped | Cron polls `origin/main` every 2 min. `husn-deploy` Mac wrapper. `redeploy` real script (not alias) on the box. |
+| **Audit watcher** | ✅ shipped | Host-side Python daemon polls the project tree every 4s and runs `.claude/audit.sh` on changes. |
 
 ---
 
-## Pivot log (newest first)
+## Frontend surface (post-redesign, 2026-06-07)
 
-### 2026-05-24 (v2) — Architecture deepening: brief skeleton + LLM-as-typewriter + two-track feedback
+Repositioned from "dashboard / integration platform" to **organizational intelligence layer**. Six destinations in the side-nav:
 
-**Decision.** Before any Step 6 code lands, locked in three load-bearing architecture commitments after a 7-agent parallel critique pass (cost / recall / alternatives / correctness / feedback-loop / privacy / adversarial). Repurposed Steps 7 and 8 from `subsumed` to cover feedback-loop and tiered-learning.
+| Route | What it is |
+|---|---|
+| `/` **Briefing** | The homepage IS the product. Six sections in order: **01 Organizational Pulse** (interactive client component: Confidence + Alignment rings with comet orbit + breath + count-up + sparkline + click-to-breakdown, Momentum + Risks beat dots), **02 Most Consequential** (dominating editorial hero with consequence-framed title, confidence bar, Potential Impact + People Closest, Reach Out For Me primary action), **03 Emerging Risks** + **04 Missing Information** as parallel columns, **05 Recommended Actions** (verb-led synthesised to-dos), **06 Active Projects** (pulse-dot workstreams). Ranked by **consequence**, not recency. |
+| `/ask` **Ask Husn** | Document-style Q&A. User turn rendered large; Husn answer as structured card (Conclusion + Evidence + next-step strip). Fixed glass composer pinned to reading column. Suggested questions on empty state. `/chat` 301 to `/ask`. |
+| `/explore` **Explore** | Organised by **understanding**, not issue type. Seven lenses: Projects · Teams · Risks · Ownership · Dependencies · Decisions · Resolved. |
+| `/organization` **Organization** | The **Organizational Digital Twin**. Five sections: **01 Workstreams** (editorial blocks: Owners · Teams involved · Dependencies · Connected decisions), **02 Organizational map** (People × Workstreams matrix — calm grid, intensity-graded dots, hover/click reveals the relationship; no spaghetti), **03 People in the picture** (context cards: "Owns work across N workstreams" / "Touches N"), **04 Decision network** (R-STATUS-1 + R-DEP + agent findings as decisions-in-motion with stacked-avatar influencers), **05 Sources of truth** (quiet chip strip). Answers "How does this organization work?" Not "what needs attention today" — that's the Briefing's job. |
+| `/investigations/[id]` **Investigations** | Case-folder layout: hero + side-by-side evidence + timeline + sticky action rail (Reach Out For Me / Collect / Ask / Snooze). |
+| `/connections` **Connections** | Demoted to "Workspace · Plumbing". Each connection card has a **Show files** toggle that lazy-loads the per-file list with green = Read (raw + normalized) / amber = Fetched (raw only). |
+| `/settings` **Settings** | Workspace, briefing cadence, integrations link, legal pointers. |
 
-**Three commitments:**
-1. **Event-sourced + materialized views, not query-time RAG.** Briefs are precomputed against a structured per-(project, persona) view. RAG is reserved for the future `/chat` surface only.
-2. **LLM-as-typewriter, never as source-of-truth.** Briefs render from a deterministic structured "brief skeleton" (facts, conflicts, changes, blockers, missed-loops). NLI post-check rejects any rendered sentence whose claim isn't in the skeleton.
-3. **Tiered learning, default deterministic.** Tier 0 (alias dict) only in MVP. Tier 1 (few-shot) deferred. Tier 2 (per-tenant LoRA) opt-in / DPIA-gated.
+**Reach Out For Me.** Cross-cutting client component. Wherever uncertainty surfaces (Briefing hero, Missing Info rows, Recommended Actions, Investigation rail, Critical-Path People), one click opens a modal with: who likely has the answer + why + pre-drafted message + Send via Slack / Email (Copy fallback). Tinted predicted/purple — the semantic colour for predicted/derived information.
 
-**Why.** Naive RAG fails this product on cost (~$3,300/tenant/mo vs ~$300–600 target), recall (top-K can't retrieve silences or deixis), correctness (1–10% hallucination floor permanently destroys TPM trust), and conflict-flattening (RAG smooths disagreement into a guess, but coordination *is* noticing disagreement). Per-tenant fine-tuning is a GDPR Art 17 + BetrVG + EU AI Act Annex III liability surface, not a feature.
+**Semantic colour vocabulary.** Green = aligned, Amber = uncertain, Red = active conflict, Purple = predicted, Blue = understood. Used only where meaning is encoded; never decorative.
 
-**Schema additions queued for Step 6:** `briefs`, `agent_runs`, `topic_segments`, `deixis_resolutions`, `expectation_misses`.
-
-**Schema additions queued for Step 7:** `clarifications`, `clarification_quorum`, `pattern_candidates`, `user_reliability`.
-
-**See** `plan.md` Steps 6, 7, 8 and `knowledge.md` §11 for the full design.
-
-### 2026-05-24 — Skip remaining deterministic rules; bring Step 6 (LLM agent) forward
-
-**Decision.** Halt further deterministic rules (R-DATE-2, R-DECISION-1, R-OWNER-1, family-key tuning, auto-close logic) and skip Step 5 (propagation) and Step 7 (forecasting) as separate steps. Collapse into a single agent-driven Step 6.
-
-**Why.** Chat messages can't be retroactively edited, so deterministic auto-close is brittle. Binding-vs-nonbinding language requires reading the conversation. Cancelled milestones don't get delete events. The LLM agent reads the full context and makes these calls; hand-coding more rules is throwaway effort.
-
-**What's kept as substrate (not wasted):**
-- Connectors, raw_artifacts, operational graph, claims table with evidence anchors, claim_groups schema, findings schema, finding_evidence schema, Drift inbox UI, R-DATE-1 (as fallback).
-
-**What's dropped:** R-DATE-2, R-DECISION-1, R-OWNER-1, auto-close-on-reconvergence, family-key tuning, separate Step 5 propagation routing, separate Step 7 forecasting model.
-
-**See** `plan.md` `Step 6` for the new scope.
+**Editorial language.** Stable H1s ("Today's brief.", "How this organization works.", etc.). No "five things deserve your attention", no spelled-out counts, no widgets, no metric cards.
 
 ---
 
-## What's next (Step 6/7/8 build plan, post-architecture-pivot)
+## Backend additions (Wave 0 + Wave 1 Stage 1)
 
-Open tasks (re-scoped to new architecture):
+| Endpoint | What it does |
+|---|---|
+| `POST /api/admin/backfill-now` | Runs every connection's `backfill_connection` inline in the API process, surfacing exceptions with full traceback. Built to debug worker-side silent failures. |
+| `POST /api/connections/{id}/reset-sync` | Drops delta cursors / history tokens so the next backfill is a full scan. |
+| `POST /api/connections/reset-sync-all` | Same, bulk. |
+| `GET /api/connections/{id}/files` | Joins `RawArtifact` + `Artifact` for per-file read status. Powers the Connections file list. |
+| `GET /api/graph/people-projects` | Joins `ArtifactMention` → `Artifact` for person × project involvement counts + dominant role (author/assignee/watcher/mention). Powers the Organization matrix. |
+| `husn.agent.skeleton.build_skeleton()` | Pure deterministic function turning claim_groups + findings + claims + evidence into typed JSON. |
+| `husn.agent.render.run()` | Strict typewriter renderer with sanitiser + deterministic template fallback. |
+| `husn.agent.nli.verify_bullets()` | Haiku-class NLI entailment check; defaults to entails=false on exception (verifier outage never lets bad bullets through). |
+| `husn.agent.run_v2.run_renderer_for_*` | Orchestrator: empty-skeleton skip, max 2 render retries, agent_runs persistence. |
 
-| # | Subject | State |
+**Drift rule framework.** `husn/drift/rules/base.py` defines a `DriftRule` Protocol; rules registered via `ALL_RULES` and evaluated in one commit per tick. R-DATE-1 / R-OWNER-1 / R-STATUS-1 implemented. R-STATUS-1 checks worst-{at_risk, blocked, delayed} vs best-{on_track, complete} within 7 days.
+
+---
+
+## Operational learnings (production)
+
+1. **Worker container needed `edge` network for outbound.** Worker without `edge` died at DNS on every external httpx call (Groq, connectors, OAuth refresh) — exceptions caught silently inside the worker. Fix: commit `327f068` — `worker.networks: [edge, internal]`.
+2. **`NEXT_PUBLIC_API_URL` must be a build arg.** Next inlines `NEXT_PUBLIC_*` into the client bundle at build time, so runtime env never reaches client code. Caused the "chat URL is localhost" bug on prod. Fix: `Dockerfile.prod ARG NEXT_PUBLIC_API_URL` + `docker-compose.prod.yml build.args`. Commit `cb5b8b4`.
+3. **Microsoft drive_deltas stuck on stale cursor.** After disconnect + reconnect, the new Connection inherited `extra.drive_deltas` and stayed in delta mode returning 0 changes. Fix: `reset-sync` endpoint clears cursor keys; next backfill falls into full-listing branch.
+4. **Healthcheck `wget --spider` (HEAD) → 405.** `/healthz` is GET-only. Compose now uses `wget -qO-`. Worker healthcheck `disable: true` (inherits api Dockerfile but doesn't run uvicorn).
+5. **`redeploy` had to be a real script, not a bash alias.** Aliases only fire in interactive shells. `install-auto-deploy.sh` writes `/usr/local/bin/redeploy`.
+6. **Groq free tier daily token cap.** `llama-3.3-70b-versatile` on demand: ~100K tokens/day per key. The cron renderer (5 personas × N projects × 30 min cadence) exhausts it within hours, after which chat 429s for the rest of the UTC day. Mitigations on the table: (a) swap renderer to `llama-3.1-8b-instant` (higher daily cap), (b) Groq Dev tier ($20/mo, ~10× limits), (c) per-role split — chat → Anthropic, cron → Groq. Not yet acted on; see *What's next*.
+
+---
+
+## Cron schedule (today, on production)
+
+| Job | Cadence | Status |
 |---|---|---|
-| 45 | Architecture pivot v2 — brief skeleton + LLM-as-typewriter | 🟡 in progress (this commit is the docs portion) |
-| 46 | `briefs` + `agent_runs` schema (Alembic `0006_agent.py`) | pending |
-| 47 | Skeleton builder (`husn.agent.skeleton.build_skeleton(project_id, persona, viewer_id) -> Skeleton`) — pure function, no LLM | pending |
-| 48 | Anthropic renderer + strict system prompt + JSON-output schema | pending — needs API key |
-| 49 | NLI verifier + reject-and-retry + deterministic-template fallback | pending |
-| 50 | Brief persistence + cron + on-demand endpoint with `viewer_id` scope | pending |
-| 51 | Dashboard: extend Drift inbox + add Briefs card with persona selector + identity-scope mock | pending |
-| 52 | `topic_segments` + topic segmentation classifier (Slack flat channels) | pending — Step 6 dep |
-| 53 | `deixis_resolutions` + deixis resolver (decision/commitment messages only) | pending — Step 6 dep |
-| 54 | `expectation_misses` + absence detector cron | pending — Step 6 dep |
-| 55 | `clarifications` + `pattern_candidates` + `user_reliability` schema (Step 7) | pending |
-| 56 | Clarification UI + Track A fact-write path | pending |
-| 57 | Track B promotion gate (quorum + COI + Dawid-Skene) + cascading rollback | pending |
-| 58 | Tier 0 alias dictionary + auto-mining of rename events (Step 8) | pending |
+| `jira_backfill` | every 60s | live |
+| `google_backfill` | every 60s | live — delta-only after first run |
+| `slack_backfill` | every 60s | live |
+| `microsoft_backfill` | every 60s | live — delta-only after first run; reset via `/reset-sync` if stuck |
+| `normalize_graph` | :00 :15 :30 :45 | live |
+| `extract_claims` | :05 :20 :35 :50 | live (Slack + Jira only — Google / Microsoft pending) |
+| `evaluate_drift` (R-DATE-1, R-OWNER-1, R-STATUS-1) | every 30 min | live |
+| `run_renderer_for_all_projects` (v2 agent) | every 30 min | live — five personas per project. Burns Groq daily quota; see *What's next*. |
+| `auto_deploy` (Mac-side / box-side cron) | every 2 min | live — pulls origin/main, runs `scripts/deploy.sh` on new commits |
 
-(Earlier tasks 39-44 covered Step 4 ship; task 38 was Step 3 e2e verify.)
+---
 
-### Pending user actions
+## What's next
 
-1. **Paste Anthropic API key** if we want Sonnet for the v2 renderer (recommended — better at strict skeleton-only-citation discipline than open models). Groq Llama 3.3 70B keeps working as fallback / for chat. Rotate the Groq key in chat after rotation cadence.
-2. (Already chosen) Triggering pattern: **scheduled cron every 5 min per (project, persona) + on-demand "Re-run analysis" button + webhook-driven on significant events**.
-3. (Already chosen) Brief output: **per-persona briefs with conflicts rendered side-by-side**. Agent findings written into existing `findings` table with `AGENT-FINDING-*` prefix.
+### Operational (unblocks ongoing usage)
 
-### Next coding session order
+1. **Groq token budget.** Pick one: swap renderer to `llama-3.1-8b-instant` OR upgrade Groq Dev tier OR split chat → Anthropic / cron → Groq.
+2. **Retry-with-`Retry-After` in the LLM client.** Single 429 currently bubbles to the UI. Add backoff in `husn.agent.llm.GroqClient`.
+3. **Register prod OAuth callbacks at each provider** per `docs/oauth-production.md`. Atlassian + Slack + Microsoft can be done in one sitting now that the live URLs are stable.
+4. **Google CASA submission.** Long pole (6–8 weeks).
 
-1. **Schema** (task 46) — `briefs`, `agent_runs`, `topic_segments`, `deixis_resolutions`, `expectation_misses` in one migration. `viewer_id` on `briefs`.
-2. **Skeleton builder** (task 47) — pure function returning structured JSON: `{viewer_id, persona, project_id, as_of, facts[], conflicts[], changes_since_last_brief[], blockers_for_persona[], expected_loops_missed[]}`. No LLM. Heavily tested in isolation.
-3. **Renderer** (task 48) — Anthropic SDK call. System prompt forbids citing claim_ids not in skeleton; forbids picking a side on conflicts; forbids per-individual language. JSON output schema enforced.
-4. **Verifier** (task 49) — NLI check on each output sentence vs its cited claim_id's source span. Reject + retry max 2. Fallback to deterministic template.
-5. **Persistence + cron + on-demand + identity-scope** (task 50) — agent_runs row per run; briefs with `viewer_id`; cron per (project, persona); RLS check enforced.
-6. **Dashboard** (task 51) — Briefs card with persona selector; mock `viewer_id` in URL pre-SSO; conflicts as side-by-side candidate cards.
-7. **Ingest-time deps** (tasks 52-54) — topic segmentation, deixis resolver, absence detector. These power the skeleton.
-8. **Feedback loop** (tasks 55-57, Step 7) — clarifications schema, UI, Track A/B, rollback.
-9. **Tier 0 dictionary** (task 58, Step 8) — populated by Step 7 promotions + auto-mined renames.
+### Wave 1 Stage 2 (paying-customer prep)
+
+1. **Tenancy + RLS migration.** Add `tenants` + `users` + invites. RLS keyed on `tenant_id` (column already present everywhere).
+2. **Auth.js v5** + Resend magic links + Google SSO.
+3. **Tenant signup + onboarding wizard.**
+4. **Stripe Checkout + portal + webhook.**
+5. **Token encryption at rest** on `connections` (AES-GCM with `TOKEN_ENCRYPTION_KEY`).
+6. **GDPR `/admin/erase` endpoint.**
+7. **`audit_events` table** + per-action audit writes.
+8. **Sentry + Better Stack** (errors + uptime).
+9. **CI/CD via GitHub Actions → GHCR.** The cron-poll auto-deploy is the bridge.
+
+### Wave 2 (when we have customers)
+
+- Per-tenant Slack manifest install pattern (already committed to in `knowledge.md` §6).
+- Step 7 feedback loop (clarifications + two-track writes).
+- Step 8 Tier 0 alias dictionary.
+- Full file-type coverage (.pptx, PDF, full sheet content).
+- Hetzner managed Postgres.
+- WorkOS SSO on first enterprise ask.
+- SOC 2 Type II ramp.
 
 ---
 
@@ -120,37 +146,16 @@ Open tasks (re-scoped to new architecture):
 
 ```bash
 # from /Users/bawani/idea/go_big_product
-docker compose ps                    # 5 containers expected
-docker compose logs -f worker        # see cron firing (15s normalize, 30s drift, 5min agent once wired)
-open http://localhost:3000           # dashboard: health + Operational graph + Drift inbox + Claims + Slack/Jira panels
-curl http://localhost:8000/health    # {"status":"ok","version":"0.0.1"}
+docker compose up --build              # boots all six services
+open http://localhost:3000             # Briefing
+curl http://localhost:8000/health      # {"status":"ok",…}
 ```
 
-### Cron schedule (today)
+Production diagnostic dump:
 
-| Job | Cadence | Status |
-|---|---|---|
-| `jira_backfill` | :00 every minute | live |
-| `google_backfill` | :15 every minute | live — delta-only after first run (Gmail historyId + Drive startPageToken cursors stored on `connections.extra`) |
-| `slack_backfill` | :30 every minute | live |
-| `normalize_graph` | :00 :15 :30 :45 | live |
-| `extract_claims` | :05 :20 :35 :50 | live (Slack + Jira only — Google not yet wired) |
-| `evaluate_drift` (R-DATE-1) | :10 :40 | live |
-| `agent_brief` (per project × persona, skeleton + render + verify) | every 5 min | **planned (Step 6)** |
-| `topic_segment` (Slack flat channels) | on-message | **planned (Step 6 dep)** |
-| `deixis_resolve` (decision/commitment messages only) | on-message | **planned (Step 6 dep)** |
-| `expectation_miss` (absence detector) | every 10 min | **planned (Step 6 dep)** |
-| `pattern_promote` (Track B quorum check) | every 30 min | **planned (Step 7)** |
-| `audit_reask` (randomised 1–3% re-asks) | daily | **planned (Step 7)** |
-
-### Current data snapshot (last known)
-
-- 10 persons · 11 identities · 1 project ("All work") · 17 project_sources (3 Slack channels + 1 Jira project + 12 Gmail labels + 1 Drive folder)
-- 62 normalised artifacts: 3 Jira issues + 1 Jira project + 3 Slack channels + 3 Slack users + 26 Slack messages + 12 Google docs + 8 Google sheets + 6 Google emails
-- 58 artifact_mentions
-- ~40 claims · 1 open finding (`R-DATE-1` release-date drift in Atlas seeded messages: 2026-06-03 vs 2026-06-10)
-
-(Re-check with `curl http://localhost:8000/api/graph/summary` + `curl http://localhost:8000/api/findings/summary`.)
+```bash
+ssh husn 'cd ~/husn && ./scripts/diag.sh'
+```
 
 ---
 
@@ -159,14 +164,17 @@ curl http://localhost:8000/health    # {"status":"ok","version":"0.0.1"}
 | Doc | What it's for |
 |---|---|
 | `PROGRESS.md` | **this file** — read first to know where we are |
-| `plan.md` | step-by-step build plan; updated when scope changes |
-| `knowledge.md` | research / market / legal / risk substrate; updated when assumptions change |
-| `prompt.md` | original product brief ("SyncGuard"); historical context, unchanged after Step 0 |
+| `README.md` | high-level overview + quick start |
+| `DEPLOY.md` | production deploy plan (Wave 0 / 1 / 2) and current state |
+| `ONBOARDING.md` | teammate handoff — clone, SSH alias, husn-deploy, day-to-day |
+| `plan.md` | step-by-step build plan + architecture pivots |
+| `knowledge.md` | research / market / legal / risk substrate; architecture decisions §11 |
 | `docs/jira-setup.md` | how the Jira OAuth integration was registered |
 | `docs/slack-setup.md` | how the Slack OAuth integration was registered |
-| `docs/google-setup.md` | how the Google OAuth client was registered + scope choice rationale |
-| `docs/microsoft-setup.md` | how the Microsoft Entra app was registered + scope choice rationale |
-| `original-prompt.md` | founder prompt captured verbatim + survived-vs-adapted side-by-side |
+| `docs/google-setup.md` | how the Google OAuth client was registered |
+| `docs/microsoft-setup.md` | how the Microsoft Entra app was registered |
+| `docs/oauth-production.md` | per-provider checklist for switching to prod OAuth callbacks |
+| `prompt.md`, `original-prompt.md` | historical — original SyncGuard brief, kept verbatim |
 | `.claude/bin/audit-watcher.{py,sh}` | always-on host-side audit daemon |
 
 ---
@@ -174,28 +182,63 @@ curl http://localhost:8000/health    # {"status":"ok","version":"0.0.1"}
 ## Update protocol
 
 When Claude makes a change:
-- **After a CODE commit:** update `Last commit on main` in the TL;DR table + add the commit hash and one-line summary to `## Recent activity`.
-- **Doc-only commits that update PROGRESS itself are exempt** from the `Last commit` bump to avoid infinite self-reference; just append to `## Recent activity`.
+- **After a CODE commit:** update `Last commit on main` + add a line under `## Recent activity`.
+- **Doc-only commits updating PROGRESS itself are exempt** from the `Last commit` bump; append to `## Recent activity` only.
 - **After a scope pivot:** add a new section to `## Pivot log`.
-- **After a step ships:** update `## Step status` table + add an exit-criteria note.
+- **After a step ships:** update `## Step status` + add an exit-criteria note.
 
 Keep this file under ~300 lines. Truncate `Recent activity` to last 30 entries.
 
 ---
 
+## Pivot log (newest first)
+
+### 2026-06-07 — Frontend repositioning: intelligence layer, not integration platform
+
+**Decision.** Across three commits (`67764d3`, `283b3eb`, `d319921`, `6d859f0`) the entire frontend was rebuilt to feel like organizational intelligence — chief of staff, not admin dashboard.
+
+- Briefing (homepage) reorganised into six named sections ranked by consequence; Most Consequential Issue dominates.
+- Organization page split conceptually from Briefing: it now answers "how does this organization work?" via the Workstreams + People × Workstreams matrix + Decision network. The Briefing answers "what needs my attention today?".
+- New cross-cutting "Reach Out For Me" affordance.
+- Editorial design language: stable H1s, restrained type, semantic palette (green/amber/red/purple/blue), pulsing live indicators on Pulse rings.
+- Light/Dark/Auto theme toggle.
+
+### 2026-06-05 — Wave 0 live, Wave 1 Stage 1 v2 agent shipped
+
+**Decision.** Step 5/6 v2 architecture is now the default agent path on production. Skeleton builder + Groq Llama 3.3 70B renderer + Haiku NLI verifier + deterministic template fallback. Five persona briefs.
+
+### 2026-05-24 (v2) — Architecture deepening: brief skeleton + LLM-as-typewriter + two-track feedback
+
+Locked in three load-bearing commitments after a 7-agent parallel critique pass: event-sourced + materialized views over query-time RAG; LLM-as-typewriter with NLI gating; tiered learning, default deterministic. See `knowledge.md` §11.
+
+### 2026-05-24 — Skip remaining deterministic rules; bring Step 6 (LLM agent) forward
+
+Halt further deterministic rules. Collapse Steps 4-remaining, 5, 7 into a single agent-driven Step 6.
+
+---
+
 ## Recent activity (newest first)
 
-- **2026-06-05** — Commit `bf6ffe1` (and the few before it): **Wave 0 production deploy is live at `https://app.husn.io`.** Hetzner CX32 in Falkenstein (Ubuntu 24.04, 178.105.157.152). Stack: `docker-compose.prod.yml` (caddy + web + api + worker + postgres + redis). Caddy auto-issues Let's Encrypt certs for `app.husn.io` and `api.husn.io`. Apex `husn.io` + `www.husn.io` left at Hostinger DNS pointing at the existing marketing site. Bring-up touched: production `Dockerfile.prod` for Next.js SSR (multi-stage build, fast cold start), `/healthz` route (GET-only, used by docker healthcheck which initially used busybox `wget --spider` (HEAD) → 405 → unhealthy → swapped to `wget -qO-` GET), `worker` healthcheck disabled because it inherits `api`'s `/health/lite` HEALTHCHECK directive but does not run uvicorn, `scripts/init-env.sh` to generate `.env.prod` secrets idempotently (replaces the fragile multi-line `sed` paste flow), apex `husn.io` removed from the Caddyfile + `DOMAIN_ROOT` removed from compose since marketing site stays untouched. **Wave 0 follow-ups still pending:** register prod OAuth callbacks at each provider per `docs/oauth-production.md`, ship placeholder `/privacy` + `/terms` pages, start Google CASA submission, delete `gh-pages` branch from the remote.
-- **2026-06-04** — Commits `34b79ff` → `008564f` → `ae1cb2f`: **Wave 0 production prep.** Backend audit + prod-readiness sweep (env-driven `PUBLIC_API_BASE_URL` / `PUBLIC_WEB_BASE_URL` / `CORS_ALLOWED_ORIGINS`, resolved OAuth redirect URIs, JSON-vs-kv logging gate, fail-fast prod env validation, `/health/lite` vs full `/health`, `--proxy-headers` + Dockerfile `HEALTHCHECK`, PROD-AUDIT TODOs for token encryption). Production infra files: `DEPLOY.md`, `Caddyfile`, `docker-compose.prod.yml`, `.env.prod.example`, `scripts/deploy.sh`, `docs/oauth-production.md`. Web teardown of the static-snapshot stack: dropped `output: export` gating in `next.config.mjs`, deleted `lib/demo.ts` + every `DEMO_MODE` branch across components, stripped baked Project Atlas transcript + connection rows, upcoming-issues widget renders empty state, rebranded `husn.ai` → `husn.io`, deleted `scripts/deploy-pages.sh`. Three parallel research/audit agents (api/ audit + Caddyfile/compose research + OAuth provider checklist) ran in background.
-- **2026-05-28** — Commit `e5f796d`: GitHub Pages static demo. Next.js `output: export` snapshot gated by `NEXT_OUTPUT_EXPORT=1` (basePath `/husn_product_mvp`), `DEMO_MODE` (`NEXT_PUBLIC_DEMO_MODE=1`) hides backend-bound controls (disconnect buttons, allowlist editors, "Run analysis") and bakes a canned chat transcript + connections snapshot; real Project Atlas graph data baked into the dashboard at build time by running `next build` inside the web container against the live API. Internal nav switched to `next/link` for basePath. `scripts/deploy-pages.sh` builds + force-pushes `web/out/` (with `.nojekyll`) to the `gh-pages` branch. Build verified green (6 routes, ATLAS-* + "Project Atlas" present in baked `index.html`). **PUSHED** — `gh-pages` branch + `main` both on origin (push was blocked for a while by a network-level github.com block; succeeded once connectivity returned). Last step is manual: enable Pages (Settings → Pages → branch `gh-pages` / root). Then live at https://usman3656.github.io/husn_product_mvp/.
-- **2026-05-25** — Commit `1a0b029`: Microsoft connector end-to-end + OneDrive content extraction (.html/.csv/.txt/.docx/.xlsx, 5 MB / 8 K cap, downloads via Graph /items/{id}/content) + per-panel disconnect button on all four source panels. Important fix: OneDrive folder picker now recognises remoteItem-mounted shared folders ("Add shortcut to My files") — previously hid them silently. Project Atlas (shared org folder) now ingested: 16 files (7 .html + 9 .csv), all with body content, avg 631 chars. Risk Register, Launch Plan, Cutover Runbook all readable as plain text. Cron `microsoft_backfill` at :45 every minute; delta-only after first run via /me/drive/items/{id}/delta + /drives/{drive}/items/{id}/delta for shared folders. PROGRESS Step 7 extended with the full file-type coverage TODO (.pptx, PDFs, full-sheet content, .rtf / .odt / .pages / .keynote, .zip).
-- **2026-05-24** — Commit `b96c1a9`: Step 6 v1 checkpoint + v2 architecture docs + chat with RAG. v1 brief path is live but explicitly NOT v2-aligned; next coding step is to rewrite to skeleton + typewriter + NLI verifier. Chat surface IS v2-aligned (RAG only on `/chat`). Verified live: 2 findings + 4 briefs from Project Atlas data in 1.96s, 0 hallucinated citations. Chat answers correctly cite Google Doc "Weekly Status Notes — Atlas" after RAG retrieval pull-in.
-- **2026-05-24** — Docs-only pivot v2: architecture deepening (brief skeleton + LLM-as-typewriter + two-track feedback + Tier-0-only learning). 7-agent parallel critic pass ratified. `knowledge.md` §11 added with the architecture decisions and §8 holes 12–14 added with the risks the critics surfaced. `plan.md` Step 6 fully rewritten; Steps 7 and 8 repurposed from `subsumed` slots to cover feedback-loop and tiered-learning. No code changes — Step 6 build will start from the new design.
-- **2026-05-24** — Commit `50e5910`: audit-watcher daemon. Host-side Python poller (no deps), 4s interval, calls existing `.claude/audit.sh` on changed files. Started in background (`pid` in `/tmp/husn-audit-watcher.pid`). Storms capped at 5 audits/tick.
-- **2026-05-24** — Commit `e5d2d39`: Google connector end-to-end. OAuth 2.0 + offline access, Gmail + Drive + Docs + Sheets pulled, allowlist UI with Drive folder TREE picker (lazy-loaded subfolder expand, multi-select at any depth), `/connections` management page with disconnect, delta sync via Gmail historyId + Drive startPageToken cursors stored on `connections.extra`. Bootstrapped against the user's `husunn.ai@gmail.com` workspace: 12 docs ("Project Atlas — Launch Plan", "QA Regression Plan", etc.), 8 sheets ("Risk Register", "Cutover Task Tracker"), 6 emails ("Cutover window approval — Atlas → June 10 GA"). Two bug fixes inline: mention dedup + ON CONFLICT, per-row rollback in normalize.
-- **2026-05-24** — Plan pivot: bring Step 6 forward, skip remaining deterministic rules. `plan.md` + `knowledge.md` + this file updated. Awaiting Anthropic API key from user.
-- **2026-05-24** — Commit `996b341`: Step 4 R-DATE-1 deterministic baseline (claim_groups + findings + finding_evidence schema, family-key grouper, R-DATE-1 evaluator with auto-close, Drift inbox UI). Fires live on the user's seeded Project Atlas data: "Release date drift in All work: 2026-06-03, 2026-06-10". This is the always-on fallback when the Step 6 agent is down or unavailable.
-- **2026-05-23** — Commit `e4bf408`: Step 3 deterministic claims extraction (7 extractors, evidence anchors, dashboard Claims card, cron every 15s). 26 claims extracted on cold boot.
-- **2026-05-23** — Commit `0e400c0`: Step 1.5 real Jira + Slack OAuth + Step 2 operational graph with continuous Arq cron sync. 27 artifacts, 22 mentions, in-sync.
-- **2026-05-23** — Commit `e3644c0`: Step 1 scaffold (docker compose, FastAPI + SQLAlchemy + Alembic, Next.js dashboard, connector stubs).
-- **2026-05-23** — Commit `91c8c02`: initial product brief (`prompt.md`).
+- **2026-06-07** — Commit `6d859f0`: Organization page redesigned as the Organizational Digital Twin. Five sections: Workstreams (editorial blocks), Organizational map (People × Workstreams matrix — no spaghetti), People in the picture (context cards), Decision network, Sources of truth (quiet). New endpoint `GET /api/graph/people-projects`. Pulse rings now alive continuously: comet head orbits each ring (8s loop), value arc gently breathes (4s loop), heartbeat center dot retained; respects `prefers-reduced-motion`.
+- **2026-06-07** — Commit `d319921`: theme toggle (Light/Auto/Dark in side-nav, no-FOUC inline script), Pulse made interactive (rings draw on mount + gradient stroke + count-up + sparkline + click-to-breakdown), new `GET /api/connections/{id}/files` endpoint + per-connection expandable file list with read/fetched status, first Organization revamp pass.
+- **2026-06-07** — Commit `283b3eb`: Husn repositioned as organizational intelligence layer — 6-section Briefing, Reach Out For Me modal, Explore lenses, Investigation case-folder, Ask Husn answer-cards.
+- **2026-06-07** — Commits `fcbe13d`, `df621eb`: title cleanup (no more raw backend summaries with 13 dates), value-list collapsibles, ONBOARDING.md hardened (drop hardcoded IdentityFile so any key works).
+- **2026-06-05** — Commit `67764d3`: editorial intelligence layer (Briefing replaces masonry, left-rail nav, Ask Husn, Investigations, Organization, theme tokens).
+- **2026-06-05** — Commits `120bbcf`, `8571eae`: ONBOARDING.md added (teammate handoff), pared to the actual workflow.
+- **2026-06-05** — Commit `327f068`: worker no-internet root-cause fix. Added `edge` network to worker service. Every external httpx call had been dying at DNS resolution.
+- **2026-06-05** — Commit `57d4308`: `POST /api/admin/backfill-now` (inline backfill with full traceback). Built specifically to debug silent worker failures.
+- **2026-06-05** — Commit `92ad9be`: `POST /api/connections/{id}/reset-sync` + `reset-sync-all`. Clears `gmail_history_id`, `drive_start_page_token`, `drive_changes_page_token`, `drive_deltas`, `outlook_deltas`, `drive_delta_link`.
+- **2026-06-04** — Commit `3cd503c`: dashboard persona selector + side-by-side conflict cards (Stage 1 UI).
+- **2026-06-04** — Commit `a235c53`: Stage 1 — deterministic extractors for scope (descope/include), dependency (Slack regex + Jira issuelinks "blocks"), commitment (first-person + intent verb + date phrase).
+- **2026-06-04** — Commit `109f56c`: Stage 1 — table-driven `DriftRule` Protocol + R-OWNER-1 + R-STATUS-1.
+- **2026-06-04** — Commit `cb5b8b4`: chat URL fix. `NEXT_PUBLIC_API_URL` baked at build time via ARG (was using runtime env which never reached client bundle).
+- **2026-06-03** — Commit `86965f3`: `scripts/diag.sh` (read-only diagnostic dump for production).
+- **2026-06-03** — Commit `a2f28e3`: v2 agent pipeline wired through cron + admin endpoint. `husn.workers.WorkerSettings` runs `run_renderer_for_all_projects`.
+- **2026-06-03** — Commit `1a33884`: Stage 1 typewriter renderer module (Groq Llama 3.3 70B, strict system prompt, JSON output schema, sanitiser, template fallback).
+- **2026-06-03** — Commit `ef50231`: Stage 1 NLI verifier (Haiku JSON-mode entailment check, defaults to entails=false on exception).
+- **2026-06-03** — Commit `62f51c6`: Stage 1 skeleton builder (`husn.agent.skeleton.build_skeleton`).
+- **2026-06-02** — Commit `8fa03ae`: `redeploy` becomes a real script in `/usr/local/bin/`, not an alias.
+- **2026-06-02** — Commit `4fcdd4d`: auto-deploy cron polls `origin/main` every 2 min, runs `scripts/deploy.sh` on new commits.
+- **2026-06-02** — Commit `942d22c`: `husn-deploy` drops into an interactive shell in `~/husn` after a successful deploy.
+- **2026-06-02** — Commits `fc9322c`, `b2cf71a`: Mac-side installers — `init-mac-deploy.sh` (`husn-deploy` wrapper) and `init-mac-ssh.sh` (host alias).
+- **2026-06-05** — Wave 0 production deploy is live at `https://app.husn.io` (Hetzner CX32 in Falkenstein, Ubuntu 24.04, `178.105.157.152`). docker-compose.prod.yml + Caddy + Let's Encrypt. Apex `husn.io` + `www.husn.io` left at Hostinger pointing at the marketing site.

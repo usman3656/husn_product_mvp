@@ -2,22 +2,19 @@
 
 > **Read `knowledge.md` first.** Three findings reshape the architecture before line 1 of code: (1) Slack ToS forbids centralized bulk pull → per-workspace install pattern, (2) CC'd shadow inbox is dead → OAuth-only for email, (3) anti-monitoring framing is product structure, not polish.
 
-> **Plan-pivot note (2026-05-24).** Original Steps 4-5-6-7 were a strict deterministic-first ladder ("no LLM before Step 6"). After shipping the Step 4 deterministic baseline (`R-DATE-1`) we observed that the rest of Steps 4-5-7 (auto-close, family-key tuning, propagation routing, separate forecasting model) are all logic the LLM agent will subsume — and chat messages can't be retroactively edited, so deterministic auto-close is inherently brittle. The pivot:
->
-> - **Step 1-3 + Step 4 deterministic baseline:** kept as the *substrate* the agent reads (ingestion, operational graph, claims with evidence anchors, claim_groups, finding_evidence schema).
-> - **Step 4 remaining rules (R-DATE-2, R-DECISION-1, R-OWNER-1, family-key tuning, auto-close):** **skipped** — the agent does richer judgement.
-> - **Step 5 (propagation routing) + Step 7 (forecasting):** **subsumed into Step 6** — the agent decides who needs to know and surfaces forecast signals in the same loop.
-> - **Step 6 (AI alignment briefs):** **brought forward and expanded** to cover findings, briefs, and recommendations in one agent.
->
-> See `## Step 6 — AI TPM agent (expanded)` below for the new scope.
+> **Plan-pivot note (2026-05-24).** Original Steps 4-5-6-7 were a strict deterministic-first ladder ("no LLM before Step 6"). After shipping the Step 4 deterministic baseline (`R-DATE-1`) we observed that the rest of Steps 4-5-7 (auto-close, family-key tuning, propagation routing, separate forecasting model) are all logic the LLM agent will subsume.
 
-> **Plan-pivot note v2 (2026-05-24, after architecture critique pass).** Before any Step 6 code lands, we ran 7 parallel critic agents (cost, recall, alternative architectures, correctness, feedback-loop design, privacy/compliance, adversarial). Convergent finding: vanilla RAG is the wrong shape for coordination. Three commitments now load-bearing — see `knowledge.md` §11 for the rationale:
+> **Plan-pivot note v2 (2026-05-24).** Locked in three load-bearing commitments after a 7-parallel-critic pass: event-sourced + materialized views over query-time RAG; LLM-as-typewriter with NLI gating; tiered learning, default deterministic. See `knowledge.md` §11.
+
+> **Plan-pivot note v3 (2026-06-07).** The frontend was repositioned end-to-end as the **organizational intelligence layer**. Three architectural commitments on the surface side, now load-bearing:
 >
-> - **Event-sourced + materialized views**, not query-time RAG. The graph + per-(project, persona) materialised views ARE the memory; the LLM never retrieves at query time for the brief path.
-> - **LLM-as-typewriter, never as source-of-truth.** Briefs are generated from a deterministic structured "brief skeleton" (facts, conflicts, changes, blockers, missed-loops). Every sentence in the rendered prose carries the `source_uri` of the skeleton fact it renders. NLI post-check rejects any sentence whose claim isn't in the skeleton; fall back to deterministic template on persistent failure.
-> - **Tiered learning, default deterministic.** Tier 0 (per-tenant alias dictionary) only in MVP. Tier 1 (few-shot at inference) once we have labels. Tier 2 (per-tenant LoRA) is opt-in, DPIA-gated, never default — per-tenant fine-tuning is a GDPR/BetrVG liability surface, not a feature.
+> - **Briefing IS the product.** The homepage answers "what needs attention today?" in six named sections ranked by consequence. Most Consequential Issue dominates. No metric cards. No dashboard widgets. No notification feed.
+> - **Organization IS the digital twin.** A distinct surface that answers "how does this organization work?" via Workstreams + People × Workstreams matrix + Decision network. Strategically separated from Briefing so the two never compete.
+> - **Reach Out For Me is a primary affordance.** Wherever Husn surfaces uncertainty, one-click outreach (who likely has the answer + why + draft message + send).
 >
-> RAG with agentic retrieval still lives — but only in the *interactive `/chat` surface* (ad-hoc TPM questions), not the brief path. **Steps 7 and 8 are now repurposed** to cover feedback-loop and tiered-learning, respectively (both originally `subsumed`).
+> See `## Frontend product surface` near the end.
+
+> **Status snapshot (2026-06-10).** Steps 1, 2, 3, 4, 6 (v2), 6-chat all shipped. Wave 0 deploy is live. Wave 1 Stage 1 (v2 agent + drift framework expansion + frontend redesign) is shipped. Next: Wave 1 Stage 2 — LLM resilience + tenancy + auth + billing.
 
 ---
 
@@ -112,19 +109,23 @@ Each step ships and is usable end-to-end before the next starts. No step starts 
 
 ---
 
-### Step 4 — Drift / conflict detection (deterministic baseline only)
+### Step 4 — Drift / conflict detection (deterministic, generalised)
 
-> **Status (2026-05-24): partially shipped, remainder skipped per pivot.**
-> Shipped: `claim_groups`, `findings`, `finding_evidence` schema + rule **R-DATE-1** + dashboard Drift inbox + family-key grouper (launch/ship/release/go-live/cutover/target → "release"). This baseline acts as the always-on fallback even if Anthropic is down.
-> Skipped: R-DATE-2 (stale), R-DECISION-1 (unrecorded), R-OWNER-1 (unannounced), auto-close-on-reconvergence, deeper family-key tuning. All subsumed by Step 6 agent.
-> Reason: chat messages can't be retroactively edited, so deterministic auto-close is inherently brittle; richer judgement (binding vs nonbinding, correction messages, cancelled milestones) requires reading the conversation, which is what the LLM does.
+> **Status (2026-06-07): shipped — table-driven rule framework + three rules.**
+> Reversed the original "skip the rest of Step 4" pivot in Wave 1 Stage 1, with a different design: instead of hand-coding each rule, we built a `DriftRule` Protocol (`husn/drift/rules/base.py`) and table-registered rules. R-DATE-1 was already live; R-OWNER-1 + R-STATUS-1 now ship alongside as protocol implementations.
 
 **What's live today:**
 - `claim_groups(project_id, kind, key)` with family-key mapping (`launch`/`ship`/`release`/`go-live`/`cutover`/`target` → `release`; `deadline`/`due`/`target` ↔ `deadline` separately).
-- R-DATE-1 fires when ≥2 distinct `value_norm` exist in a date-claim-group with confidence ≥ 0.5. Opens one finding per `(rule_id, claim_group_id)` (partial unique index enforces this).
+- **`DriftRule` Protocol** — `rule_id`, `applies_to_kind`, `severity`, `summary_template`, `detects()`, `build_summary()`. `ALL_RULES` registry in `husn/drift/rules/__init__.py`; evaluator iterates table-driven.
+- **R-DATE-1** (severity high) — ≥2 distinct `value_norm` in a date-claim-group with confidence ≥ 0.5.
+- **R-OWNER-1** (severity medium) — ≥2 distinct owner candidates in an owner-claim-group.
+- **R-STATUS-1** (severity high) — worst-{at_risk, blocked, delayed} vs best-{on_track, complete} within 7 days.
+- One finding per `(rule_id, claim_group_id)` (partial unique index enforces this).
 - `findings.details` carries `per_source` blocks so the UI shows "Slack says X / Jira says Y" side-by-side.
-- Cron `evaluate_drift` runs at `:10` and `:40` every minute, plus on worker startup.
-- UI surface: red "Drift inbox" card on dashboard with side-by-side evidence; "in sync" green badge when zero open.
+- Cron `evaluate_drift` runs every 30 min plus on worker startup; one commit per tick.
+- UI surface: surfaced in Briefing (Most Consequential, Emerging Risks, Missing Information), Investigation case-folders, Explore (Risks / Ownership lenses), Organization Decision Network.
+
+**New deterministic extractors (Wave 1 Stage 1):** `husn/claims/extractors/scope.py` (descope/include), `dependency.py` (Slack regex + Jira `issuelinks` "blocks"), `commitment.py` (first-person + intent verb + date phrase).
 
 **Strict UX rule (carried into Step 6):** findings name **artifacts and teams**, never individuals.
 
@@ -138,7 +139,13 @@ Each step ships and is usable end-to-end before the next starts. No step starts 
 
 ### Step 6 — AI TPM agent (brief skeleton + LLM-as-typewriter)
 
-> **Brought forward; rewritten 2026-05-24 after architecture critique pass.** Replaces remaining Step 4 rules and old Step 5. The LLM is a constrained renderer over a deterministic "brief skeleton" — never the source of truth for facts. See `knowledge.md` §11.A–B.
+> **Status (2026-06-07): shipped — Wave 1 Stage 1.** Pipeline live on production. See modules:
+> - `husn/agent/skeleton.py` — pure deterministic skeleton builder
+> - `husn/agent/render.py` — Groq Llama 3.3 70B strict typewriter prompt + sanitiser + deterministic template fallback
+> - `husn/agent/nli.py` — Anthropic Haiku JSON-mode entailment verifier (default-fail-closed)
+> - `husn/agent/run_v2.py` — orchestrator with empty-skeleton skip + max 2 render retries + `agent_runs` persistence
+> - Personas: TPM, Eng Manager, QA Lead, Security Lead, Ops Manager.
+> - Wired through cron `run_renderer_for_all_projects` every 30 min + admin `POST /api/agent/trigger`.
 
 **Goal:** For each project, produce per-persona briefs whose every sentence is traceable to a `source_uri` in the project graph, and whose facts are computed by deterministic queries — not by the model.
 
@@ -294,6 +301,45 @@ Each step ships and is usable end-to-end before the next starts. No step starts 
 2. Auto-mined renames (Jira project name change, Slack channel rename, doc title diff) appear in the dictionary within one cron cycle.
 3. Admin can view, edit, expire, or delete any dictionary entry with full evidence trail.
 4. Dictionary state is fully reproducible from the event log + clarifications table (no baked state).
+
+---
+
+## Frontend product surface (shipped Wave 1 Stage 1, 2026-06-07)
+
+Repositioned from "dashboard / integration platform" to **organizational intelligence layer**. Six destinations under the side-nav. Detailed description lives in `PROGRESS.md` "Frontend surface"; design rationale here:
+
+### Briefing — the homepage IS the product
+Six sections in order, ranked by **consequence**, never recency: Organizational Pulse (live rings: continuous comet orbit + breath + count-up + sparkline + click-to-breakdown) → Most Consequential (dominating editorial hero, confidence bar, Potential Impact / People Closest, Reach Out For Me as the primary action) → Emerging Risks + Missing Information (parallel columns) → Recommended Actions (verb-led to-dos) → Active Projects.
+
+### Organization — the Organizational Digital Twin
+A distinct surface, never overlapping the Briefing. Five sections: Workstreams (editorial blocks) → Organizational map (People × Workstreams matrix: calm grid, intensity-graded dots, hover/click reveals the relationship, no spaghetti) → People in the picture (context cards) → Decision network (R-STATUS-1 + R-DEP + agent findings framed as decisions-in-motion with stacked-avatar influencers) → Sources of truth (quiet chip strip). Answers "**how does this organization work?**" — never "what needs attention today" (that's Briefing).
+
+### Ask Husn — document-style Q&A
+Conclusion + Evidence + next-step structure per answer. Not ChatGPT-with-citations. Suggested questions on empty state. `/chat` 301-redirects to `/ask`.
+
+### Investigations — case folder per finding
+Hero + side-by-side evidence + timeline + sticky action rail with Reach Out For Me.
+
+### Explore — by understanding, not issue type
+Seven lenses: Projects · Teams · Risks · Ownership · Dependencies · Decisions · Resolved.
+
+### Connections — workspace plumbing
+Restyled, demoted. Each connection has a Show files toggle that lazy-loads the per-file list with green = Read (raw + normalized) / amber = Fetched.
+
+### Cross-cutting: Reach Out For Me
+Surfaced wherever Husn shows uncertainty. Tinted predicted/purple — the semantic colour for derived information. Opens a modal with: who likely has the answer + why + draft message + Send via Slack/Email (Copy fallback).
+
+### Theme
+Light / Auto / Dark in side-nav. `data-theme` on `<html>`, no-FOUC inline boot script, 200 ms colour transitions, `color-scheme` hint per choice.
+
+### Semantic colour vocabulary
+- Green = aligned
+- Amber = uncertain
+- Red = active conflict
+- Purple = predicted
+- Blue = understood
+
+Used only where meaning is encoded; never decorative.
 
 ---
 

@@ -6,9 +6,12 @@
 >
 > **Companion docs:**
 > - `prompt.md` — the longer SyncGuard product brief that existed before this build kicked off.
-> - `knowledge.md` — research synthesis (market / personas / business / legal).
+> - `knowledge.md` — research synthesis (market / personas / business / legal / architecture decisions §11).
 > - `plan.md` — the implementation plan that grew out of this prompt.
-> - `PROGRESS.md` — live state log.
+> - `PROGRESS.md` — living state log; read first to know where the build is today.
+> - `DEPLOY.md` — production deploy plan + operational state.
+> - `README.md` — high-level overview of the product surface as it stands.
+> - `ONBOARDING.md` — teammate handoff.
 
 ---
 

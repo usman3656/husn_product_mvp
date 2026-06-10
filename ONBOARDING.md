@@ -86,6 +86,22 @@ docker compose up --build
 - App: <http://localhost:3000>
 - API: <http://localhost:8000/health>
 
+## 6 — What's live for you to explore
+
+Once you're on `https://app.husn.io` (or `http://localhost:3000` locally), the
+side-nav has six destinations:
+
+- **Briefing** (`/`) — homepage. Six sections ranked by consequence.
+- **Ask Husn** (`/ask`) — document Q&A; cites sources.
+- **Explore** (`/explore`) — seven lenses (Projects · Teams · Risks · Ownership · Dependencies · Decisions · Resolved).
+- **Organization** (`/organization`) — the digital twin: Workstreams + People × Workstreams matrix + Decision network.
+- **Connections** (`/connections`) — every source with a Show files toggle (read / fetched per file).
+- **Settings** (`/settings`) — workspace, briefing cadence, legal.
+
+Top-left of the side-nav footer is the **Light / Auto / Dark theme toggle.**
+
+Cross-cutting: **Reach Out For Me** — purple button wherever Husn surfaces uncertainty. Opens a modal with the person, the reason, a draft message, and a Send. Click it on the Briefing hero to see what it does.
+
 ## That's the whole loop.
 
 The server, DNS, certs, OAuth callbacks, secrets, auto-deploy cron — all
