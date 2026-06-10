@@ -1,173 +1,163 @@
-# husn — Multi-tenancy + Authentication Plan
+# husn — Multi-tenancy + Authentication Plan (v2)
 
 > Status: **PROPOSED — awaiting founder sign-off. No code written yet.**
-> Written 2026-06-10 after a two-agent audit (codebase tenancy inventory + auth architecture research).
+> v2, 2026-06-10: switched from open-signup+invites to the **Jira-style admin-provisioned directory** model per founder direction, validated by a third research pass.
 
 ---
 
-## 1. Goal
+## 1. The model (founder's words, made precise)
 
-Turn the live single-tenant deploy into a real multi-company app:
+- **One admin (or more) controls the company.** They create the workspace, manage an admin panel, add team members' emails with roles, and connect all data sources (Slack / Jira / Google / Microsoft) **once, at the org level**.
+- **A regular member just logs in with their email.** Their email is already in the company directory (the admin put it there), so login routes them straight into the company workspace. They can use Ask Husn, see the Briefing / Explore / Organization / Investigations — but cannot touch org configuration. That's the admin's.
+- **Connectors are company-level, not per-user.** Acme's admin connects Acme's Slack; every Acme member's intelligence is fed from it. Members never see an OAuth screen.
 
-1. Each company gets its own workspace. No data ever crosses companies.
-2. Each person logs in (magic link or Google). Signed-out = login page, nothing else.
-3. Inside a company, people see only their projects (viewer scoping becomes real).
-4. Connections (Slack/Jira/Google/Microsoft) are per-company.
-5. Signup flow: create workspace → invite teammates → connect tools → pick scope → briefs.
+**Acceptance criteria:**
+- Fresh incognito window → login page, nothing else.
+- New company: log in with an unknown email → "No workspace found → Create a workspace" → empty clean workspace, you're the owner/admin.
+- Admin adds `teammate@acme.com` with role *member* in Settings → teammate logs in with just their email → lands in Acme's workspace, sees dashboards + chat, sees **no** admin controls.
+- Admin connects Slack → it's Acme's connection. Second company's data never touches Acme's.
 
-**Acceptance criteria (from the founder, kept verbatim as the definition of done):**
-- Fresh incognito window → login page.
-- Sign up as a brand-new company → empty, clean workspace.
-- Invite a teammate → they log in → see only what their role allows.
-- Connect Slack to my company → stays mine.
-- If a second company signs up tomorrow, our data doesn't touch theirs in any way.
-
-**Explicitly out of scope:** Stripe billing · SAML/WorkOS · per-customer servers · legal copy rewrites.
+**Out of scope:** Stripe · SAML/WorkOS · per-customer servers · domain capture (auto-join by @acme.com — deferred; without DNS verification it's an account-takeover primitive).
 
 ---
 
-## 2. Ground truth (what the audit found — corrects the docs)
+## 2. Ground truth (from the codebase audit — corrects the docs)
 
-- **`tenant_id` exists on ZERO tables.** plan.md/DEPLOY.md claimed otherwise; that claim is removed. 16 tables in `api/husn/db/models.py`; migrations run 0001–0008, next is **0009**.
-- **No user auth anywhere.** No login, no sessions, no users table. `SESSION_SECRET` is only the HMAC key for OAuth `state` signing (`core/oauth.py`). Only middleware is CORS (already `allow_credentials=True` — convenient).
-- **Every data endpoint leaks.** All 19 routers unauthenticated; `GET /api/connections` returns all rows; anyone can DELETE connections, trigger backfills, burn LLM spend via `POST /api/agent/run`, read/delete chat sessions, and call the Atlassian personal-data **delete** endpoint.
-- **Connections have no owner.** Created on OAuth callback keyed `(source, account_id)` — two companies connecting the same Slack workspace would silently overwrite each other's tokens.
-- **`viewer_id` is a no-op.** Plumbed through `build_skeleton()` but always `None`, used in no query.
-- **Six unique constraints are global and must be re-keyed per tenant:** `uq_connection_source_account`, `uq_raw_artifact_source_extid_ver`, `uq_identity_source_user`, `uq_project_source_scope`, `projects.slug`, `uq_claim_group_project_kind_key`.
-- **Worker shape is friendly:** backfills already iterate per-Connection (natural tenant boundary once Connection carries tenant_id). The global sweeps (normalize / extract / drift) work on rows that will carry tenant_id; the one real cross-tenant bleed risk is **person identity merge by email** — must become `(tenant_id, email)`.
-- **Web fetch split:** 4 SSR pages + ~10 server components fetch via internal `http://api:8000` (must forward the user's cookie); ~8 client components fetch `https://api.husn.io` directly (cookie flows automatically once `Domain=.husn.io`).
+- `tenant_id` exists on **zero** of the 16 tables (docs claimed all). No users table. Next migration: 0009.
+- **No auth anywhere.** All 19 routers unauthenticated; `SESSION_SECRET` is only the OAuth-state HMAC key. Only middleware is CORS (already `allow_credentials=True`).
+- Connections have no owner; keyed `(source, account_id)` globally — must become per-tenant.
+- `viewer_id` in the brief pipeline is a no-op (always None).
+- Six global unique constraints need per-tenant re-keying (`uq_connection_source_account`, `uq_raw_artifact_source_extid_ver`, `uq_identity_source_user`, `uq_project_source_scope`, `projects.slug`, `uq_claim_group_project_kind_key`).
+- Cross-tenant bleed risk in workers: person identity merge by email must become `(tenant_id, email)`.
+- Web fetch split: 4 SSR pages + ~10 server components fetch internally (must forward session cookie); ~8 client components fetch the API directly (cookie flows once `Domain=.husn.io`).
 
 ---
 
 ## 3. Architecture decisions
 
 ### D1 — FastAPI owns auth. No Auth.js.
-Login endpoints live on the API. Session = opaque random ID in **Redis** (`session:{id}` → `{user_id, tenant_id, role}`, ~30-day sliding TTL). Cookie: `HttpOnly; Secure; Domain=.husn.io; SameSite=Lax; Path=/`. Because `app.` and `api.` are same-site siblings, the browser sends the cookie on XHR with no `SameSite=None` hacks; SSR forwards the incoming `Cookie` header to `http://api:8000`.
-*Why:* one auth system instead of two. The API already runs four OAuth dances; Redis is already in the stack; revocation is `DEL` one key. Auth.js v5 would add a JWT bridge + a second source of session truth. (This supersedes the "Auth.js v5" earmark in DEPLOY.md — docs updated at ship time.)
+Sessions: opaque ID in Redis (`session:{id}` → `{user_id, tenant_id, role}`, 30-day sliding TTL) + a `user_sessions:{user_id}` set for instant revocation. Cookie `HttpOnly; Secure; Domain=.husn.io; SameSite=Lax`. CSRF: custom header required on non-GET + Origin check.
+**Per-request membership re-validation** — the session names the tenant, but each request re-checks `memberships WHERE user+tenant AND status='active'`. A removed member's live session dies immediately even if Redis cleanup races.
 
-**CSRF posture:** cookie+Lax still needs care on state-changing requests → require header `X-Husn-Csrf: 1` on non-GET + verify `Origin == https://app.husn.io`. No token dance.
+### D2 — Magic links only at v1. Google sign-in button optional, later.
+Resend; `login_tokens` DB rows (sha256 hash, 15-min expiry, atomic single-use); landing page with a "Sign in" button that POSTs (email-scanner-safe); 3/email/15min rate limit; no user enumeration.
+*Founder console work shrinks to:* **Resend DNS only.** (The separate Google sign-in client is shelved until we want the convenience button.)
 
-### D2 — Magic links via Resend, DB-row tokens.
-`login_tokens(token_hash sha256, email, expires_at 15min, used_at)`. Single-use enforced atomically (`UPDATE … WHERE used_at IS NULL RETURNING`). Rate limit 3/email/15min via Redis. Always answer "check your email" (no user enumeration). Email-scanner safe: the link lands on a page with a "Sign in" button that POSTs the token (Outlook SafeLinks prefetch can't burn it).
-*Founder action required:* create Resend account, add DNS records (DKIM/SPF on a sending subdomain + DMARC). Free tier (3K emails/mo) is plenty.
+### D3 — Admin-provisioned directory (the Jira model)
+```
+memberships(id, tenant_id, email NORMALIZED, role enum[owner|admin|member],
+            user_id NULLABLE, status enum[invited|active|removed],
+            added_by, created_at, first_login_at)
+UNIQUE (tenant_id, email)
+```
+- Admin adds an email → row with `status='invited'`, `user_id=NULL`.
+- First login with that email → `users` row created just-in-time, linked by email match, `status → 'active'`, `first_login_at` stamped.
+- Email normalization: lowercase + trim, exact-match after that. **No** gmail dot/plus canonicalization (Atlassian/Slack treat `a+x@` as distinct; canonicalizing mis-links people). Admin UI warns on plus-addresses.
+- Removal: `status='removed'` (soft) + kill all their sessions via the Redis set. User row + chat history retained ("Deactivated user" attribution — it's org work product). Hard-delete only on explicit GDPR request.
+- Recycled email (new hire reuses a departed person's address): re-adding creates a **fresh membership**; old chat sessions are not auto-relinked.
+- Typo'd email: harmless — row sits `invited` forever; the magic link only ever goes to the typo'd address. Admin sees "never logged in" and deletes.
 
-### D3 — Google login uses a NEW OAuth client (same GCP project).
-Scopes `openid email profile` only — non-sensitive, no verification, no unverified-app warning on every login. The existing connector client (restricted Gmail/Drive scopes) stays for connectors only. Distinct redirect: `/auth/login/google/callback`.
-*Founder action required:* register the client, paste ID/secret into `.env.prod`.
+### D4 — Login flow: one screen, fork after verification
+1. `app.husn.io` → `/login` → email → magic link → click → verify.
+2. Memberships found = 1 → straight into that workspace.
+3. Memberships > 1 (consultant case) → workspace picker; choice stored as `active_tenant_id` in the session. Tenant **never** accepted from request params — session only.
+4. Memberships = 0 → one screen: *"No workspace found for x@y.com — **Create a workspace** / Ask your admin to add you."* The create path is the new-company self-serve funnel (creates tenant + owner membership). No separate `/signup` URL — same plumbing, no "which page do I use" confusion. (This is Atlassian's and Notion's exact flow.)
 
-### D4 — Enforcement: tenant-scoped session dependency now; RLS backstop immediately after, same workstream.
-- **Layer 1 (functional walls, ships first):** `require_user()` FastAPI dependency resolves the session cookie → `{user, tenant_id, role}` and 401s otherwise. All data routers depend on it. A `tenant_session()` dependency yields the DB session + `tenant_id`; every query in routers/services takes `tenant_id` as a required argument. One CI check asserts no model with `tenant_id` is queried outside scoped helpers.
-- **Layer 2 (defense in depth, honors the knowledge.md §11.C commitment):** Postgres RLS policies on every tenant-scoped table. App connects as a new non-owner role `husn_app` (RLS applies naturally — avoids the FORCE-RLS owner footgun); Alembic keeps the owner role for migrations. The same `tenant_session()` dependency runs `SET LOCAL app.tenant_id = :t` at transaction start — `SET LOCAL` is transaction-scoped, safe on a plain asyncpg pool. Arq jobs get tenant context from the Connection/Project row they're processing and use the same helper.
-- Layer 2 ships **before this work is declared done** — it's the backstop that makes a scoping bug a non-event instead of a breach. (Alternative considered and rejected: defer RLS entirely. Rejected because §11.C is a locked commitment and the marginal cost — one DB role + one SET LOCAL in a dependency we need anyway + per-table policies in one migration — is contained.)
+### D5 — Role gates (two dependencies, every router)
+- `require_member()` → `(user, tenant, role)` for any active member. Gates **all tenant-scoped reads + chat**.
+- `require_admin()` → asserts role ∈ {owner, admin}. Gates **all org mutations**.
 
-### D5 — Roles: `owner / admin / member`, plus `project_members`.
-- **owner** — everything incl. delete workspace (billing later).
-- **admin** — invites, connectors, allowlists; sees all projects.
-- **member** — sees only projects they're a member of (`project_members(project_id, user_id)`).
-- `viewer_id` in the brief pipeline becomes the logged-in user's id; `build_skeleton()` filters to projects the viewer can see. Personas stay as-is (a persona is a lens, not an identity).
+| Endpoint group | Gate |
+|---|---|
+| `chat.py` (Ask Husn), `agent.py` GETs, `graph.py`, `findings.py`, `claims.py`, `artifacts.py`, `slack_feed.py`, `connections.py` GET (read-only status) | member |
+| `connections.py` DELETE / reset-sync / reset-sync-all, `google_admin` + `microsoft_admin` allowlists + folder browse, `jira_admin` + `slack_admin` backfills, `admin_diag` backfill-now, all four connector OAuth start/callback, members CRUD (new), workspace settings (new) | admin |
+| `POST /api/agent/run` | **admin** (org-shared output, LLM spend control; per-tenant rate limit). Chat stays member — that's the product. |
+| `atlassian_personal_data.py` | provider JWT verification (separate fix, included in C3) |
 
-### D6 — Tenancy roots and derivation.
-Direct `tenant_id` column on: `tenants` (new), `users`/`memberships`/`invites`/`login_tokens` (new), `connections`, `raw_artifacts`, `persons`, `person_identities`, `projects`, `claim_groups`, `agent_runs`, `chat_sessions` (+`user_id`), `briefs`. Transitively derivable but stamped anyway for query simplicity + RLS: `artifacts`, `claims`, `findings`. Pure join tables (`artifact_mentions`, `claim_group_members`, `finding_evidence`, `chat_messages`, `project_sources`) derive through their parent and get RLS via EXISTS-policies.
-All six global unique constraints re-keyed to include `tenant_id`.
+Admins see all projects (founder confirmed default unless overridden). Members see only `project_members` projects; `viewer_id` in `build_skeleton()` becomes the real user and filters accordingly.
+
+### D6 — Enforcement layers
+1. Tenant-scoped session dependency — every query takes `tenant_id` from the session-resolved membership. CI check: no tenant-scoped model queried outside scoped helpers.
+2. **Postgres RLS backstop** (honors knowledge.md §11.C): non-owner `husn_app` role, `SET LOCAL app.tenant_id` in the same dependency, policies per table (EXISTS-policies for join tables). Alembic keeps the owner role. Ships before this work is declared done.
+
+### D7 — Tenancy roots (unchanged from v1 plan)
+Direct `tenant_id` on: connections, raw_artifacts, persons, person_identities, projects, claim_groups, agent_runs, chat_sessions (+`user_id`), briefs, artifacts, claims, findings + the new tables. Join tables derive. All six global unique constraints re-keyed per tenant.
 
 ---
 
-## 4. New schema (migration 0009, one migration)
+## 4. New schema (migration 0009)
 
 ```
 tenants(id, name, slug unique, created_at)
-users(id, email unique, name, avatar_url, created_at, last_login_at)   -- last_login_at is for security/audit only; never surfaced in product UI (anti-monitoring)
-memberships(user_id, tenant_id, role enum[owner|admin|member], created_at)  PK(user_id, tenant_id)
-invites(id, tenant_id, email, role, token_hash, expires_at 7d, accepted_at, created_by)
-       UNIQUE(tenant_id, email) WHERE accepted_at IS NULL
+users(id, email unique normalized, name, avatar_url, created_at, last_login_at)
+     -- last_login_at: security audit only; rendered NOWHERE (anti-monitoring)
+memberships(…)                          -- as D3
 login_tokens(id, email, token_hash, expires_at, used_at)
-project_members(project_id, user_id)  PK both
-+ tenant_id columns + constraint re-keys per D6
+project_members(project_id, user_id)    PK both
++ tenant_id columns (nullable at C1) + constraint re-keys per D7
 ```
 
-Backfill in the same migration: create tenant #1 (founder's workspace), user #1 (founder's email), owner membership, stamp every existing row with tenant #1, add founder to every existing project, then set NOT NULL.
+**No founder bootstrap. Existing production data is wiped at cutover** (founder decision 2026-06-10): the C4 deploy truncates all data tables (connections, raw_artifacts, graph, claims, findings, briefs, agent_runs, chat) and sets `tenant_id NOT NULL`. The founder then signs up through the normal create-workspace flow like any other company, reconnects the four tools, re-picks allowlists; backfills repopulate within the hour. This removes the entire backfill/stamping complexity from 0009 — columns are added nullable at C1, the app keeps running on existing data until C4, and the wipe + login wall land in the same deploy.
+
+*(No `invites` table — the directory model absorbs it. "Notify by email" checkbox on add-member just fires a magic link.)*
 
 ---
 
-## 5. Auth flows
+## 5. Admin panel — expand Settings, no separate /admin route
 
-- `POST /auth/login/magic` — accepts email → token row → Resend send.
-- `GET  /auth/login/magic/confirm?token=` — renders confirm page (web) → `POST /auth/login/magic/consume` → session + cookie → redirect.
-- `GET  /auth/login/google/start` + `/callback` — standard code flow, login client.
-- New email with no membership and no invite → **signup**: name-your-workspace page → creates tenant + owner membership.
-- New email with a pending invite → membership created on accept (collision-safe: keyed on email at accept time).
-- `POST /auth/logout` — DEL session key + expire cookie.
-- `GET /auth/me` — `{user, tenant, role}` for the web shell.
+`web/app/settings/page.tsx` is already grouped sections; the side-nav already has a "Workspace" group. Changes:
 
-OAuth **connector** flows: `/auth/{provider}/start` now requires an authenticated admin/owner; `tenant_id` + acting user are embedded in the already-HMAC-signed `state`; callback stamps them onto the Connection row. The on-conflict key becomes `(tenant_id, source, account_id)`.
-
----
-
-## 6. Frontend work
-
-1. **Login page** (`/login`) — email field (magic link) + "Continue with Google". Editorial style, consistent with the design system.
-2. **Auth guard** — Next middleware checks the session cookie's presence; server components use a shared `apiFetch()` helper that forwards `cookies()` and redirects to `/login` on 401. (Centralizes the 14 fetch sites; they currently each hand-roll fetch.)
-3. **Signup wizard** (`/welcome`) — name workspace → invite teammates (optional, skippable) → connect tools (links to existing connector flows) → pick channels/folders (existing allowlist UIs) → "Your first briefing is being prepared."
-4. **Invite accept** (`/invite/[token]`) — sign in with the invited email → lands in the workspace.
-5. **Workspace switcher stub** — top of side-nav shows tenant name (multi-workspace switching deferred; one membership per user is fine for v1, schema already supports more).
-6. **Settings → Members** — list members + roles, invite form, revoke invite. (Owner/admin only. Shows name + role ONLY — no activity data, no "last seen". Anti-monitoring rules apply to admin surfaces too.)
-7. **Project membership UI** — minimal: admins assign members to projects from Settings.
+- **Settings → Members** (admin-only group): table of members — name, email, role, status (`invited` = never logged in / `active`) — add-member form (email + role + optional "send them a sign-in link"), change-role, remove. **Shows nothing behavioral — no last-active, no usage counts** (anti-monitoring applies to admin surfaces).
+- **Settings → Workspace** (admin-only): rename workspace.
+- **Connections page**: stays at `/connections`; mutating controls (connect, disconnect, reset, allowlists) render only for admins; members get a read-only "what's connected" view.
+- **Side-nav**: Workspace section items render by role (from `GET /auth/me`).
+- **Login page** (`/login`) + **no-workspace fork screen** + **workspace picker** (only shown when >1) + **create-workspace screen** — all editorial style.
+- **`apiFetch()` helper**: centralizes the 14 fetch sites; SSR forwards `cookies()`; 401 → redirect `/login`.
 
 ---
 
-## 7. Worker changes
+## 6. Worker changes (unchanged from v1 plan)
 
-- Backfills: per-Connection (already) — stamp `tenant_id` from the connection onto every `raw_artifact`.
-- Normalize: derive tenant from the raw row; person identity merge keys on `(tenant_id, email)` — the one real bleed risk, fixed at the root.
-- Extract / drift: rows carry tenant_id; claim grouping + findings keyed per tenant.
-- Agent renderer: iterates projects (which carry tenant_id); `viewer_id`-scoped briefs filter by `project_members`.
-- All worker DB access goes through the same scoped-session helper (sets `SET LOCAL` for the RLS backstop).
+Backfills stamp `tenant_id` from their Connection. Normalize derives per-row; person identity merge keys `(tenant_id, email)`. Drift + agent iterate per-tenant naturally via stamped rows/projects. All worker DB access uses the same scoped helper (sets `SET LOCAL` for RLS).
 
 ---
 
-## 8. Migration & rollout (live deploy must not break)
+## 7. Rollout (live deploy must not break)
 
-Sequenced commits, each deployable; auto-deploy picks them up one at a time:
+1. **C1 — Migration 0009.** Additive only (new tables + nullable tenant_id columns). App keeps running on existing data, unauthenticated, unchanged.
+2. **C2 — Auth endpoints** (magic send/landing/consume, logout, /auth/me, create-workspace, workspace picker). Nothing enforced. *Gate: Resend DNS done.*
+3. **C3 — Scoping.** All routers gated per D5 table; connector `state` carries tenant + acting admin; workers stamp tenant; Atlassian JWT verification. `AUTH_REQUIRED=0` honored so the live app stays open until C4.
+4. **C4 — Cutover.** Frontend (login, fork screen, apiFetch, role-aware nav, Settings → Members, read-only connections for members) + migration 0010 (**truncate all data tables, set tenant_id NOT NULL, re-key unique constraints**) + flip `AUTH_REQUIRED=1` — one deploy. From this moment: incognito → login page; founder signs up fresh, creates their company, reconnects tools.
+5. **C5 — RLS backstop** (husn_app role + policies, switch app DATABASE_URL).
+6. **C6 — viewer scoping** (`project_members` in `build_skeleton()` + chat dossier + member UI differences).
 
-1. **C1 — Schema + backfill (0009).** Additive only; nothing reads the new columns yet. Existing app keeps working unauthenticated. Verify on prod: founder tenant exists, all rows stamped.
-2. **C2 — Auth endpoints + session plumbing.** Magic link, Google login, logout, /auth/me. Nothing enforced yet. Founder action gate: Resend DNS + Google login client must be done before this lands (else magic links can't send).
-3. **C3 — Scoped reads/writes.** All routers take `require_user()` + tenant-scoped queries; connector `state` carries tenant; workers stamp tenant. **Enforcement flag** `AUTH_REQUIRED=0` honored for exactly one deploy so the founder can log in and sanity-check before the wall goes up.
-4. **C4 — Frontend: login page, apiFetch with cookie forwarding, auth guard, /welcome wizard, members UI.** Flip `AUTH_REQUIRED=1` in the same deploy. From this moment: incognito → login page. Founder logs in with their email; their workspace is tenant #1 with all existing data.
-5. **C5 — RLS backstop.** `husn_app` role + policies (0010) + `SET LOCAL` already in place from C3's helper. Switch app's DATABASE_URL to the new role.
-6. **C6 — viewer scoping.** `project_members` enforcement in `build_skeleton()` + chat dossier; member-role UI differences.
+Smoke after C4 + C5: full acceptance list + a second test tenant end-to-end (create workspace → add member email → member logs in → sees empty briefing, no admin controls).
 
-Smoke checklist after C4 and C5 mirrors the acceptance criteria, plus: second test tenant created end-to-end (signup → connect nothing → empty briefing → invite a second test email → member sees nothing until added to a project).
-
-**Rollback posture:** C1–C2 are inert if reverted. C3+C4 roll back together via `AUTH_REQUIRED=0` + previous image. C5 rolls back by switching DATABASE_URL back to the owner role.
+**Rollback:** C1–C2 inert. C3 via `AUTH_REQUIRED=0`. C4 is the point of no return for the old data (wipe is intentional, founder-approved); the app itself rolls back via previous image + `AUTH_REQUIRED=0` if the login flow breaks. C5 via DATABASE_URL switch back.
 
 ---
 
-## 9. What I need from you (founder actions, can be done while C1–C2 are being built)
+## 8. Founder actions
 
-1. **Resend**: create account, I'll give you the exact DNS records to add at Hostinger.
-2. **Google sign-in client**: 5 minutes in the existing GCP project; I'll give the exact settings.
-3. **Decide:** is `admin sees all projects` correct for your taste? (Recommended yes — avoids a self-grant dead-end.)
-4. **Your workspace name + the email you'll log in with** (becomes tenant #1 / user #1 in the backfill).
+1. **Resend**: account + DNS records at Hostinger. *Done per founder (2026-06-10). Verify domain shows "Verified" before C2 deploys.*
+2. ~~Workspace name + login email~~ — not needed; existing data is wiped at C4 and the founder signs up through the normal flow like any other company.
+3. ~~Google sign-in client~~ — deferred (magic links only at v1; "sign up with Gmail" = magic link to a Gmail address, no console work). The "Continue with Google" button is a 5-minute additive follow-up whenever wanted.
 
----
+## 9. Anti-monitoring guardrails (restated, non-negotiable)
 
-## 10. Anti-monitoring guardrails carried through (non-negotiable, restated)
-
-- No "last active" on people anywhere in product UI. (`users.last_login_at` exists for security audit only and is rendered nowhere.)
-- Members UI shows name/email/role — nothing behavioral.
+- Members UI: name/email/role/invited-or-active only. No last-active, no usage data, no behavioral anything.
+- `users.last_login_at` is security audit data; rendered nowhere.
+- Admins cannot see other members' chat sessions (chat scoped `user_id`, no admin override).
 - Briefs and findings keep naming artifacts and teams, never individuals.
-- No admin surface gains visibility into another member's chat sessions (chat is per-user: `chat_sessions.user_id` scoping, admins included).
 
----
-
-## 11. Effort estimate
+## 10. Effort
 
 | Chunk | Size |
 |---|---|
 | C1 schema + backfill | 1 day |
-| C2 auth endpoints + session | 1–1.5 days |
-| C3 scoped routers + workers + connector state | 1.5–2 days |
-| C4 frontend (login, guard, wizard, members) | 1.5–2 days |
+| C2 auth endpoints | 1–1.5 days |
+| C3 scoping (routers + workers + connector state) | 1.5–2 days |
+| C4 frontend | 1.5–2 days |
 | C5 RLS backstop | 0.5–1 day |
 | C6 viewer scoping | 0.5–1 day |
 | **Total** | **~6–8 focused days** |
