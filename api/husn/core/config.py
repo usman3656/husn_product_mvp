@@ -79,6 +79,20 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-sonnet-4-6"
 
+    # --- Auth + tenancy (TENANCY.md) -------------------------------------
+    # AUTH_REQUIRED=0 keeps every endpoint open (the pre-cutover bridge).
+    # Flipped to 1 in the C4 deploy. Anything but "0"/""/"false" counts as on.
+    auth_required: bool = False
+    # Cookie Domain. Prod: ".husn.io" so app. and api. share the session
+    # cookie. Local-dev: empty → host-only cookie on localhost.
+    cookie_domain: str = ""
+    # Session lifetime (sliding) in days.
+    session_ttl_days: int = 30
+    # Resend (magic-link email). Blank = magic links log to stdout instead of
+    # sending (local-dev affordance).
+    resend_api_key: str = ""
+    resend_from: str = "Husn <login@husn.io>"
+
     # --- Derived helpers -------------------------------------------------
 
     def cors_origins_list(self) -> list[str]:

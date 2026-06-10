@@ -6,6 +6,119 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from husn.db.base import Base
 
+# ---------------------------------------------------------------------------
+# Tenancy + auth (TENANCY.md, migration 0009).
+#
+# Model: Jira-style admin-provisioned directory.
+#   * A tenant is a company workspace.
+#   * memberships is the directory: the admin adds (email, role) rows BEFORE
+#     the person ever logs in. The users row is created just-in-time on first
+#     magic-link login and linked by exact-after-lowercase email match.
+#   * tenant_id columns on data tables are NULLABLE until the C4 cutover
+#     (migration 0010 truncates pre-tenancy data and sets NOT NULL).
+# ---------------------------------------------------------------------------
+
+
+class Tenant(Base):
+    """A company workspace. Created via the self-serve create-workspace flow."""
+
+    __tablename__ = "tenants"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(256), nullable=False)
+    slug: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class User(Base):
+    """A person who can log in. Created just-in-time on first login.
+
+    email is stored normalized (lowercase + trim) and matched exactly after
+    that — NO gmail dot/plus canonicalization (a+x@ is a distinct identity).
+
+    last_login_at exists for security audit ONLY and is rendered nowhere in
+    product UI (anti-monitoring guardrail — see TENANCY.md §9).
+    """
+
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    email: Mapped[str] = mapped_column(String(320), nullable=False, unique=True)
+    name: Mapped[str | None] = mapped_column(String(256))
+    avatar_url: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class Membership(Base):
+    """The company directory. One row per (tenant, email).
+
+    status: invited  — admin added the email; person never logged in
+            active   — person has logged in at least once
+            removed  — admin removed them (soft; sessions killed immediately,
+                       user row + chat history retained, re-adding the email
+                       creates a FRESH membership — no auto-relink)
+    role:   owner | admin | member
+    user_id is NULL until first login (JIT user creation).
+    """
+
+    __tablename__ = "memberships"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    email: Mapped[str] = mapped_column(String(320), nullable=False)
+    role: Mapped[str] = mapped_column(String(16), nullable=False, default="member")
+    user_id: Mapped[int | None] = mapped_column(BigInteger, index=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="invited")
+    added_by: Mapped[int | None] = mapped_column(BigInteger)  # user_id of the admin
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    first_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "email", name="uq_membership_tenant_email"),
+        Index("ix_membership_email", "email"),
+        Index("ix_membership_user_tenant", "user_id", "tenant_id"),
+    )
+
+
+class LoginToken(Base):
+    """A single-use magic-link token. We store only the SHA-256 of the token
+    (a DB leak cannot forge logins). Atomic single-use via
+    UPDATE ... SET used_at=now() WHERE token_hash=:h AND used_at IS NULL RETURNING.
+    """
+
+    __tablename__ = "login_tokens"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    email: Mapped[str] = mapped_column(String(320), nullable=False, index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ProjectMember(Base):
+    """Which members can see a project. Admins/owners see all projects
+    implicitly; this table scopes `member`-role visibility and the
+    viewer_id parameter of the brief pipeline (C6).
+    """
+
+    __tablename__ = "project_members"
+
+    project_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
 
 class RawArtifact(Base):
     """
@@ -18,6 +131,7 @@ class RawArtifact(Base):
     __tablename__ = "raw_artifacts"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int | None] = mapped_column(BigInteger, index=True)  # NOT NULL at C4
     source: Mapped[str] = mapped_column(String(32), nullable=False)
     kind: Mapped[str] = mapped_column(String(64), nullable=False)
     external_id: Mapped[str] = mapped_column(String(256), nullable=False)
@@ -47,6 +161,7 @@ class Connection(Base):
     __tablename__ = "connections"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int | None] = mapped_column(BigInteger, index=True)  # NOT NULL at C4
     source: Mapped[str] = mapped_column(String(32), nullable=False)
     account_id: Mapped[str] = mapped_column(String(128), nullable=False)
     account_label: Mapped[str | None] = mapped_column(String(256))
@@ -79,6 +194,7 @@ class Person(Base):
     __tablename__ = "persons"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int | None] = mapped_column(BigInteger, index=True)  # NOT NULL at C4
     primary_name: Mapped[str] = mapped_column(String(256), nullable=False)
     primary_email: Mapped[str | None] = mapped_column(String(256))
     created_at: Mapped[datetime] = mapped_column(
@@ -100,6 +216,7 @@ class PersonIdentity(Base):
     __tablename__ = "person_identities"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int | None] = mapped_column(BigInteger, index=True)  # NOT NULL at C4
     person_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
     source: Mapped[str] = mapped_column(String(32), nullable=False)
     source_user_id: Mapped[str] = mapped_column(String(256), nullable=False)
@@ -123,6 +240,9 @@ class Project(Base):
     __tablename__ = "projects"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int | None] = mapped_column(BigInteger, index=True)  # NOT NULL at C4
+    # NOTE: slug uniqueness becomes per-tenant at C4 (migration 0010 re-keys
+    # the unique constraint to (tenant_id, slug)).
     slug: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     name: Mapped[str] = mapped_column(String(256), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
@@ -165,6 +285,7 @@ class Artifact(Base):
     __tablename__ = "artifacts"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int | None] = mapped_column(BigInteger, index=True)  # NOT NULL at C4
     raw_artifact_id: Mapped[int] = mapped_column(BigInteger, nullable=False, unique=True)
     project_id: Mapped[int | None] = mapped_column(BigInteger, index=True)
     source: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -225,6 +346,7 @@ class Claim(Base):
     __tablename__ = "claims"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int | None] = mapped_column(BigInteger, index=True)  # NOT NULL at C4
     project_id: Mapped[int | None] = mapped_column(BigInteger, index=True)
     source_artifact_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
     kind: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -268,6 +390,7 @@ class ClaimGroup(Base):
     __tablename__ = "claim_groups"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int | None] = mapped_column(BigInteger, index=True)  # NOT NULL at C4
     project_id: Mapped[int | None] = mapped_column(BigInteger, index=True)
     kind: Mapped[str] = mapped_column(String(32), nullable=False)
     key: Mapped[str] = mapped_column(String(128), nullable=False)
@@ -307,6 +430,7 @@ class Finding(Base):
     __tablename__ = "findings"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int | None] = mapped_column(BigInteger, index=True)  # NOT NULL at C4
     rule_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     claim_group_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
     project_id: Mapped[int | None] = mapped_column(BigInteger, index=True)
@@ -354,6 +478,7 @@ class AgentRun(Base):
     __tablename__ = "agent_runs"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int | None] = mapped_column(BigInteger, index=True)  # NOT NULL at C4
     project_id: Mapped[int | None] = mapped_column(BigInteger, index=True)
     trigger: Mapped[str] = mapped_column(String(32), nullable=False)  # cron|manual|on_change
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="running")  # running|ok|failed
@@ -383,6 +508,10 @@ class ChatSession(Base):
     __tablename__ = "chat_sessions"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int | None] = mapped_column(BigInteger, index=True)  # NOT NULL at C4
+    # Chat is PER-USER: admins have no override into other members' sessions
+    # (anti-monitoring guardrail — TENANCY.md §9). NOT NULL at C4.
+    user_id: Mapped[int | None] = mapped_column(BigInteger, index=True)
     project_id: Mapped[int | None] = mapped_column(BigInteger, index=True)
     title: Mapped[str] = mapped_column(String(200), nullable=False, default="(untitled)")
     created_at: Mapped[datetime] = mapped_column(
@@ -433,6 +562,7 @@ class Brief(Base):
     __tablename__ = "briefs"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int | None] = mapped_column(BigInteger, index=True)  # NOT NULL at C4
     project_id: Mapped[int | None] = mapped_column(BigInteger, index=True)
     agent_run_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
     persona: Mapped[str] = mapped_column(String(64), nullable=False)

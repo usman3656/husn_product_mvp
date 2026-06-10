@@ -195,7 +195,10 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "200mb", "--maxmemory-policy", "allkeys-lru"]
+    # noeviction: Redis now holds auth sessions + rate-limit counters + arq
+    # queues — none of which may be silently evicted. Writes fail loudly at
+    # maxmemory instead (we alert long before 200mb at this scale).
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "200mb", "--maxmemory-policy", "noeviction"]
     volumes:
       - redis_data:/data
     networks:

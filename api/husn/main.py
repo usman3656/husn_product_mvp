@@ -12,6 +12,7 @@ from husn.routers import (
     atlassian_personal_data,
     auth_google,
     auth_jira,
+    auth_login,
     auth_microsoft,
     auth_slack,
     chat,
@@ -22,6 +23,7 @@ from husn.routers import (
     graph,
     health,
     jira_admin,
+    members,
     microsoft_admin,
     slack_admin,
     slack_feed,
@@ -51,6 +53,8 @@ app.add_middleware(
 )
 
 app.include_router(health.router)
+app.include_router(auth_login.router)
+app.include_router(members.router)
 app.include_router(auth_jira.router)
 app.include_router(jira_admin.router)
 app.include_router(auth_slack.router)
