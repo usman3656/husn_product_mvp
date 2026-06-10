@@ -4,6 +4,12 @@ Step 2 doesn't ship a project-management UI. We auto-create a project named
 'All work' on first run and attach every Slack channel + Jira project we see
 as scopes, so newly-ingested artifacts have somewhere to land.
 
+Tenancy (TENANCY.md C3): the default project is PER-TENANT. During the
+AUTH_REQUIRED=0 bridge tenant_id is None and behavior is identical to
+pre-tenancy (one global 'All work'). After the C4 cutover each company gets
+its own default project the first time its data is normalized, and scopes
+attach within that tenant only.
+
 A real customer setup will later let the user split this into per-program
 projects (e.g. 'Project Atlas') and re-assign scopes; that UI is out of scope
 for Step 2.
@@ -19,12 +25,20 @@ DEFAULT_PROJECT_SLUG = "all-work"
 DEFAULT_PROJECT_NAME = "All work"
 
 
-async def get_or_create_default_project(session: AsyncSession) -> Project:
-    result = await session.execute(select(Project).where(Project.slug == DEFAULT_PROJECT_SLUG))
+async def get_or_create_default_project(
+    session: AsyncSession, tenant_id: int | None = None
+) -> Project:
+    q = select(Project).where(Project.slug == DEFAULT_PROJECT_SLUG)
+    if tenant_id is not None:
+        q = q.where(Project.tenant_id == tenant_id)
+    result = await session.execute(q)
     project = result.scalar_one_or_none()
     if project:
         return project
-    project = Project(slug=DEFAULT_PROJECT_SLUG, name=DEFAULT_PROJECT_NAME)
+    # NOTE: projects.slug is globally unique until migration 0010 re-keys it
+    # to (tenant_id, slug). During the bridge only one 'all-work' exists, so
+    # this insert cannot collide; after 0010 each tenant gets its own.
+    project = Project(tenant_id=tenant_id, slug=DEFAULT_PROJECT_SLUG, name=DEFAULT_PROJECT_NAME)
     session.add(project)
     await session.flush()
     return project
@@ -52,14 +66,21 @@ async def ensure_scope(
     await session.execute(stmt)
 
 
-async def auto_scope_from_raw_artifacts(session: AsyncSession, project_id: int) -> int:
-    """Sweep raw_artifacts and attach any channel/project we haven't scoped yet."""
+async def auto_scope_from_raw_artifacts(
+    session: AsyncSession, project_id: int, tenant_id: int | None = None
+) -> int:
+    """Sweep raw_artifacts and attach any channel/project we haven't scoped yet.
+
+    Tenant-scoped: only this tenant's raw rows feed this tenant's project
+    scopes (no filter during the bridge).
+    """
     added = 0
 
     # Slack channels
-    chs = await session.execute(
-        select(RawArtifact).where(RawArtifact.source == "slack", RawArtifact.kind == "channel")
-    )
+    ch_q = select(RawArtifact).where(RawArtifact.source == "slack", RawArtifact.kind == "channel")
+    if tenant_id is not None:
+        ch_q = ch_q.where(RawArtifact.tenant_id == tenant_id)
+    chs = await session.execute(ch_q)
     for r in chs.scalars():
         ch_id = (r.payload or {}).get("id")
         if not ch_id:
@@ -74,9 +95,10 @@ async def auto_scope_from_raw_artifacts(session: AsyncSession, project_id: int) 
         added += 1
 
     # Jira projects
-    prjs = await session.execute(
-        select(RawArtifact).where(RawArtifact.source == "jira", RawArtifact.kind == "project")
-    )
+    prj_q = select(RawArtifact).where(RawArtifact.source == "jira", RawArtifact.kind == "project")
+    if tenant_id is not None:
+        prj_q = prj_q.where(RawArtifact.tenant_id == tenant_id)
+    prjs = await session.execute(prj_q)
     for r in prjs.scalars():
         key = (r.payload or {}).get("key")
         if not key:

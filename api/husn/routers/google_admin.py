@@ -17,6 +17,8 @@ from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from husn.auth.deps import AuthContext, require_admin
+from husn.auth.scope import tenant_where
 from husn.connectors.google.client import GoogleClient
 from husn.connectors.google.listing import (
     get_folder_metadata,
@@ -37,9 +39,13 @@ GMAIL_LABEL_SCOPE = "gmail_label"
 DRIVE_FOLDER_SCOPE = "drive_folder"
 
 
-async def _current_connection(session: AsyncSession) -> Connection:
+async def _current_connection(session: AsyncSession, ctx: AuthContext) -> Connection:
     result = await session.execute(
-        select(Connection).where(Connection.source == "google").order_by(Connection.id.desc())
+        tenant_where(
+            select(Connection).where(Connection.source == "google").order_by(Connection.id.desc()),
+            Connection,
+            ctx,
+        )
     )
     conn = result.scalar_one_or_none()
     if not conn:
@@ -48,9 +54,12 @@ async def _current_connection(session: AsyncSession) -> Connection:
 
 
 @router.get("/labels")
-async def get_labels(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+async def get_labels(
+    session: AsyncSession = Depends(get_session),
+    ctx: AuthContext = Depends(require_admin),
+) -> dict[str, Any]:
     """Gmail labels for the picker."""
-    conn = await _current_connection(session)
+    conn = await _current_connection(session, ctx)
     async with GoogleClient(connection=conn, session=session) as gc:
         labels = await list_labels(gc)
     return {
@@ -72,6 +81,7 @@ async def get_labels(session: AsyncSession = Depends(get_session)) -> dict[str, 
 async def get_folders(
     parent_id: str = "root",
     session: AsyncSession = Depends(get_session),
+    ctx: AuthContext = Depends(require_admin),
 ) -> dict[str, Any]:
     """Drive subfolders of `parent_id`. `parent_id='root'` = My Drive root.
 
@@ -79,7 +89,7 @@ async def get_folders(
     Also returns the count of direct child files so the UI shows
     `📁 X (12 files)` for each folder.
     """
-    conn = await _current_connection(session)
+    conn = await _current_connection(session, ctx)
     async with GoogleClient(connection=conn, session=session) as gc:
         body = await list_folder_children(gc, parent_id=parent_id)
     return {
@@ -102,10 +112,12 @@ async def get_folders(
 
 @router.get("/folders/{folder_id}/metadata")
 async def get_folder_meta(
-    folder_id: str, session: AsyncSession = Depends(get_session)
+    folder_id: str,
+    session: AsyncSession = Depends(get_session),
+    ctx: AuthContext = Depends(require_admin),
 ) -> dict[str, Any]:
     """Resolve a stored folder id back to name (used for rendering already-selected items in the tree)."""
-    conn = await _current_connection(session)
+    conn = await _current_connection(session, ctx)
     async with GoogleClient(connection=conn, session=session) as gc:
         try:
             meta = await get_folder_metadata(gc, folder_id)
@@ -122,8 +134,11 @@ async def get_folder_meta(
 
 
 @router.get("/allowlist")
-async def get_allowlist(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
-    project = await get_or_create_default_project(session)
+async def get_allowlist(
+    session: AsyncSession = Depends(get_session),
+    ctx: AuthContext = Depends(require_admin),
+) -> dict[str, Any]:
+    project = await get_or_create_default_project(session, tenant_id=ctx.tenant_id)
     result = await session.execute(
         select(ProjectSource).where(
             ProjectSource.project_id == project.id,
@@ -147,11 +162,12 @@ class AllowlistBody(BaseModel):
 async def set_allowlist(
     body: AllowlistBody,
     session: AsyncSession = Depends(get_session),
+    ctx: AuthContext = Depends(require_admin),
 ) -> dict[str, Any]:
     """Replace the Google allowlist for the default project. Idempotent:
     re-running with the same body yields the same project_sources rows.
     """
-    project = await get_or_create_default_project(session)
+    project = await get_or_create_default_project(session, tenant_id=ctx.tenant_id)
 
     # Wipe existing google rows (cheap — there are at most ~6 of them)
     await session.execute(

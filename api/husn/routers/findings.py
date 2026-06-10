@@ -6,6 +6,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from husn.auth.deps import AuthContext, require_member
+from husn.auth.scope import tenant_where
 from husn.db.models import Claim, ClaimGroup, Finding, FindingEvidence
 from husn.db.session import get_session
 
@@ -13,23 +15,42 @@ router = APIRouter(prefix="/api/findings", tags=["findings"])
 
 
 @router.get("/summary")
-async def summary(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+async def summary(
+    session: AsyncSession = Depends(get_session),
+    ctx: AuthContext = Depends(require_member),
+) -> dict[str, Any]:
     open_count = (
-        await session.execute(select(func.count(Finding.id)).where(Finding.status == "open"))
+        await session.execute(
+            tenant_where(
+                select(func.count(Finding.id)).where(Finding.status == "open"), Finding, ctx
+            )
+        )
     ).scalar_one()
     closed_count = (
-        await session.execute(select(func.count(Finding.id)).where(Finding.status == "closed"))
+        await session.execute(
+            tenant_where(
+                select(func.count(Finding.id)).where(Finding.status == "closed"), Finding, ctx
+            )
+        )
     ).scalar_one()
     by_rule = (
         await session.execute(
-            select(Finding.rule_id, func.count(Finding.id))
-            .where(Finding.status == "open")
-            .group_by(Finding.rule_id)
+            tenant_where(
+                select(Finding.rule_id, func.count(Finding.id))
+                .where(Finding.status == "open")
+                .group_by(Finding.rule_id),
+                Finding,
+                ctx,
+            )
         )
     ).all()
     last_open = (
         await session.execute(
-            select(func.max(Finding.opened_at)).where(Finding.status == "open")
+            tenant_where(
+                select(func.max(Finding.opened_at)).where(Finding.status == "open"),
+                Finding,
+                ctx,
+            )
         )
     ).scalar()
     return {
@@ -45,8 +66,9 @@ async def list_findings(
     status: str = Query("open", pattern="^(open|closed|all)$"),
     limit: int = Query(50, ge=1, le=200),
     session: AsyncSession = Depends(get_session),
+    ctx: AuthContext = Depends(require_member),
 ) -> dict[str, Any]:
-    stmt = select(Finding).order_by(desc(Finding.opened_at)).limit(limit)
+    stmt = tenant_where(select(Finding).order_by(desc(Finding.opened_at)).limit(limit), Finding, ctx)
     if status != "all":
         stmt = stmt.where(Finding.status == status)
     rows = (await session.execute(stmt)).scalars().all()
@@ -70,17 +92,25 @@ async def list_findings(
 
 @router.get("/{finding_id}")
 async def get_finding(
-    finding_id: int, session: AsyncSession = Depends(get_session)
+    finding_id: int,
+    session: AsyncSession = Depends(get_session),
+    ctx: AuthContext = Depends(require_member),
 ) -> dict[str, Any]:
     f = await session.get(Finding, finding_id)
     if not f:
         raise HTTPException(404, "finding not found")
+    if ctx.tenant_id is not None and f.tenant_id != ctx.tenant_id:
+        raise HTTPException(404, "finding not found")
     group = await session.get(ClaimGroup, f.claim_group_id)
     evidence_rows = (
         await session.execute(
-            select(Claim, FindingEvidence)
-            .join(FindingEvidence, FindingEvidence.claim_id == Claim.id)
-            .where(FindingEvidence.finding_id == f.id)
+            tenant_where(
+                select(Claim, FindingEvidence)
+                .join(FindingEvidence, FindingEvidence.claim_id == Claim.id)
+                .where(FindingEvidence.finding_id == f.id),
+                Claim,
+                ctx,
+            )
         )
     ).all()
     return {

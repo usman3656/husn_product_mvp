@@ -59,7 +59,12 @@ async def run_renderer_for_project(
     client = get_llm_client()
     personas = personas or DEFAULT_PERSONAS
 
+    # Tenancy derives from the project (TENANCY.md C3).
+    project = await session.get(Project, project_id)
+    tenant_id = project.tenant_id if project else None
+
     run = AgentRun(
+        tenant_id=tenant_id,
         project_id=project_id,
         trigger=trigger,
         status="running",
@@ -112,6 +117,7 @@ async def run_renderer_for_project(
             nli_result=nli_result,
             fallback_used=fallback_used,
             attempts=attempts,
+            tenant_id=tenant_id,
         )
         await session.commit()
 
@@ -267,6 +273,7 @@ async def _persist_briefs(
     nli_result: NLIResult | None,
     fallback_used: bool,
     attempts: int,
+    tenant_id: int | None = None,
 ) -> int:
     """One Brief row per persona the renderer produced. Stage 2 will move
     the skeleton + verifier audit into dedicated columns.
@@ -297,6 +304,7 @@ async def _persist_briefs(
         }
 
         brief = Brief(
+            tenant_id=tenant_id,
             project_id=project_id,
             agent_run_id=run_id,
             persona=b.get("persona", "TPM"),

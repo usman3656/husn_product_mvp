@@ -11,10 +11,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import delete, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from husn.auth.deps import AuthContext, require_admin, require_member
+from husn.auth.scope import tenant_where
 from husn.core.logging import log
 from husn.db.models import (
     Artifact,
     Connection,
+    Project,
     ProjectSource,
     RawArtifact,
 )
@@ -24,35 +27,56 @@ router = APIRouter(prefix="/api/connections", tags=["connections"])
 
 
 @router.get("")
-async def list_connections(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+async def list_connections(
+    session: AsyncSession = Depends(get_session),
+    ctx: AuthContext = Depends(require_member),
+) -> dict[str, Any]:
     """All connections across all sources, with health + sync metrics."""
-    conns = (await session.execute(select(Connection).order_by(Connection.id))).scalars().all()
+    conns = (
+        await session.execute(
+            tenant_where(select(Connection).order_by(Connection.id), Connection, ctx)
+        )
+    ).scalars().all()
 
     out = []
     now = datetime.now(UTC)
     for c in conns:
         last_raw = (
             await session.execute(
-                select(func.max(RawArtifact.fetched_at)).where(
-                    RawArtifact.source == c.source
+                tenant_where(
+                    select(func.max(RawArtifact.fetched_at)).where(
+                        RawArtifact.source == c.source
+                    ),
+                    RawArtifact,
+                    ctx,
                 )
             )
         ).scalar()
         raw_count = (
             await session.execute(
-                select(func.count(RawArtifact.id)).where(RawArtifact.source == c.source)
+                tenant_where(
+                    select(func.count(RawArtifact.id)).where(RawArtifact.source == c.source),
+                    RawArtifact,
+                    ctx,
+                )
             )
         ).scalar_one()
         artifact_count = (
             await session.execute(
-                select(func.count(Artifact.id)).where(Artifact.source == c.source)
+                tenant_where(
+                    select(func.count(Artifact.id)).where(Artifact.source == c.source),
+                    Artifact,
+                    ctx,
+                )
             )
         ).scalar_one()
-        scope_count = (
-            await session.execute(
-                select(func.count(ProjectSource.id)).where(ProjectSource.source == c.source)
+        # ProjectSource has no tenant_id — derive via the owning Project.
+        scope_q = select(func.count(ProjectSource.id)).where(ProjectSource.source == c.source)
+        if ctx.tenant_id is not None:
+            scope_q = scope_q.join(Project, Project.id == ProjectSource.project_id).where(
+                Project.tenant_id == ctx.tenant_id
             )
-        ).scalar_one()
+        scope_count = (await session.execute(scope_q)).scalar_one()
 
         token_status = "ok"
         seconds_until_expiry: int | None = None
@@ -88,7 +112,9 @@ async def list_connections(session: AsyncSession = Depends(get_session)) -> dict
 
 @router.delete("/{connection_id}")
 async def disconnect(
-    connection_id: int, session: AsyncSession = Depends(get_session)
+    connection_id: int,
+    session: AsyncSession = Depends(get_session),
+    ctx: AuthContext = Depends(require_admin),
 ) -> dict[str, Any]:
     """Remove a connection + its project_sources rows. Raw artifacts/
     artifacts/claims are kept (so historical analysis isn't lost) but new
@@ -101,13 +127,20 @@ async def disconnect(
       Google → myaccount.google.com → Security → Third-party apps
     """
     conn = await session.get(Connection, connection_id)
-    if not conn:
+    if not conn or (ctx.tenant_id is not None and conn.tenant_id != ctx.tenant_id):
         raise HTTPException(404, f"connection {connection_id} not found")
 
-    # Remove the per-source allowlist rows for this source
-    await session.execute(
-        delete(ProjectSource).where(ProjectSource.source == conn.source)
-    )
+    # Remove the per-source allowlist rows for this source.
+    # ProjectSource has no tenant_id — when scoped, restrict to the tenant's
+    # projects so a disconnect never wipes another tenant's allowlist.
+    ps_delete = delete(ProjectSource).where(ProjectSource.source == conn.source)
+    if ctx.tenant_id is not None:
+        ps_delete = ps_delete.where(
+            ProjectSource.project_id.in_(
+                select(Project.id).where(Project.tenant_id == ctx.tenant_id)
+            )
+        )
+    await session.execute(ps_delete)
     await session.delete(conn)
     await session.commit()
     log.info("husn.connections.disconnect", source=conn.source, account_id=conn.account_id)
@@ -153,7 +186,9 @@ def _drop_cursor_keys(extra: dict[str, Any] | None) -> tuple[dict[str, Any], lis
 
 @router.post("/{connection_id}/reset-sync")
 async def reset_sync(
-    connection_id: int, session: AsyncSession = Depends(get_session)
+    connection_id: int,
+    session: AsyncSession = Depends(get_session),
+    ctx: AuthContext = Depends(require_admin),
 ) -> dict[str, Any]:
     """Drop delta cursors / history tokens so the next backfill is full-scan.
 
@@ -162,7 +197,7 @@ async def reset_sync(
     or after the founder forces a recovery from a known-good state.
     """
     conn = await session.get(Connection, connection_id)
-    if not conn:
+    if not conn or (ctx.tenant_id is not None and conn.tenant_id != ctx.tenant_id):
         raise HTTPException(404, f"connection {connection_id} not found")
     new_extra, dropped = _drop_cursor_keys(conn.extra)
     conn.extra = new_extra
@@ -187,6 +222,7 @@ async def list_connection_files(
     connection_id: int,
     limit: int = Query(80, ge=1, le=500),
     session: AsyncSession = Depends(get_session),
+    ctx: AuthContext = Depends(require_member),
 ) -> dict[str, Any]:
     """Files (RawArtifacts) read from this connection's source, with read
     status per file.
@@ -201,7 +237,7 @@ async def list_connection_files(
     Returns most-recent first, capped at `limit`.
     """
     conn = await session.get(Connection, connection_id)
-    if not conn:
+    if not conn or (ctx.tenant_id is not None and conn.tenant_id != ctx.tenant_id):
         raise HTTPException(404, f"connection {connection_id} not found")
 
     stmt = (
@@ -222,16 +258,25 @@ async def list_connection_files(
         .order_by(desc(RawArtifact.fetched_at))
         .limit(limit)
     )
+    stmt = tenant_where(stmt, RawArtifact, ctx)
     rows = (await session.execute(stmt)).all()
 
     total_raw = (
         await session.execute(
-            select(func.count(RawArtifact.id)).where(RawArtifact.source == conn.source)
+            tenant_where(
+                select(func.count(RawArtifact.id)).where(RawArtifact.source == conn.source),
+                RawArtifact,
+                ctx,
+            )
         )
     ).scalar_one()
     total_artifacts = (
         await session.execute(
-            select(func.count(Artifact.id)).where(Artifact.source == conn.source)
+            tenant_where(
+                select(func.count(Artifact.id)).where(Artifact.source == conn.source),
+                Artifact,
+                ctx,
+            )
         )
     ).scalar_one()
 
@@ -265,11 +310,16 @@ async def list_connection_files(
 
 
 @router.post("/reset-sync-all")
-async def reset_sync_all(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+async def reset_sync_all(
+    session: AsyncSession = Depends(get_session),
+    ctx: AuthContext = Depends(require_admin),
+) -> dict[str, Any]:
     """Bulk: clear cursors on every connection. Same semantics as the
     per-connection endpoint, applied to all rows in one transaction.
     """
-    conns = (await session.execute(select(Connection))).scalars().all()
+    conns = (
+        await session.execute(tenant_where(select(Connection), Connection, ctx))
+    ).scalars().all()
     summary: list[dict[str, Any]] = []
     for c in conns:
         new_extra, dropped = _drop_cursor_keys(c.extra)

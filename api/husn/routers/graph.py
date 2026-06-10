@@ -6,6 +6,8 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from husn.auth.deps import AuthContext, require_member
+from husn.auth.scope import tenant_where
 from husn.db.models import (
     Artifact,
     ArtifactMention,
@@ -21,25 +23,54 @@ router = APIRouter(prefix="/api/graph", tags=["graph"])
 
 
 @router.get("/summary")
-async def summary(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+async def summary(
+    session: AsyncSession = Depends(get_session),
+    ctx: AuthContext = Depends(require_member),
+) -> dict[str, Any]:
     """Counts + most-recent timestamps. Cheap; safe to poll from the dashboard."""
 
     async def scalar(q):
         return (await session.execute(q)).scalar_one()
 
-    persons = await scalar(select(func.count(Person.id)))
-    identities = await scalar(select(func.count(PersonIdentity.id)))
-    projects = await scalar(select(func.count(Project.id)))
-    scopes = await scalar(select(func.count(ProjectSource.id)))
-    artifacts = await scalar(select(func.count(Artifact.id)))
-    mentions = await scalar(select(func.count()).select_from(ArtifactMention))
-    raw_pending = await scalar(
-        select(func.count(RawArtifact.id))
-        .outerjoin(Artifact, Artifact.raw_artifact_id == RawArtifact.id)
-        .where(Artifact.id.is_(None))
+    persons = await scalar(tenant_where(select(func.count(Person.id)), Person, ctx))
+    identities = await scalar(
+        tenant_where(select(func.count(PersonIdentity.id)), PersonIdentity, ctx)
     )
-    last_raw = (await session.execute(select(func.max(RawArtifact.fetched_at)))).scalar()
-    last_normalized = (await session.execute(select(func.max(Artifact.normalized_at)))).scalar()
+    projects = await scalar(tenant_where(select(func.count(Project.id)), Project, ctx))
+    # ProjectSource has no tenant_id — derive via the owning Project.
+    scopes_q = select(func.count(ProjectSource.id))
+    if ctx.tenant_id is not None:
+        scopes_q = scopes_q.join(Project, Project.id == ProjectSource.project_id).where(
+            Project.tenant_id == ctx.tenant_id
+        )
+    scopes = await scalar(scopes_q)
+    artifacts = await scalar(tenant_where(select(func.count(Artifact.id)), Artifact, ctx))
+    # ArtifactMention has no tenant_id — derive via the joined Artifact.
+    mentions_q = select(func.count()).select_from(ArtifactMention)
+    if ctx.tenant_id is not None:
+        mentions_q = mentions_q.join(
+            Artifact, Artifact.id == ArtifactMention.artifact_id
+        ).where(Artifact.tenant_id == ctx.tenant_id)
+    mentions = await scalar(mentions_q)
+    raw_pending = await scalar(
+        tenant_where(
+            select(func.count(RawArtifact.id))
+            .outerjoin(Artifact, Artifact.raw_artifact_id == RawArtifact.id)
+            .where(Artifact.id.is_(None)),
+            RawArtifact,
+            ctx,
+        )
+    )
+    last_raw = (
+        await session.execute(
+            tenant_where(select(func.max(RawArtifact.fetched_at)), RawArtifact, ctx)
+        )
+    ).scalar()
+    last_normalized = (
+        await session.execute(
+            tenant_where(select(func.max(Artifact.normalized_at)), Artifact, ctx)
+        )
+    ).scalar()
 
     return {
         "counts": {
@@ -57,8 +88,13 @@ async def summary(session: AsyncSession = Depends(get_session)) -> dict[str, Any
 
 
 @router.get("/projects")
-async def list_projects(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
-    proj_rows = (await session.execute(select(Project).order_by(Project.id))).scalars().all()
+async def list_projects(
+    session: AsyncSession = Depends(get_session),
+    ctx: AuthContext = Depends(require_member),
+) -> dict[str, Any]:
+    proj_rows = (
+        await session.execute(tenant_where(select(Project).order_by(Project.id), Project, ctx))
+    ).scalars().all()
 
     out = []
     for p in proj_rows:
@@ -69,7 +105,11 @@ async def list_projects(session: AsyncSession = Depends(get_session)) -> dict[st
         ).scalars().all()
         artifact_count = (
             await session.execute(
-                select(func.count(Artifact.id)).where(Artifact.project_id == p.id)
+                tenant_where(
+                    select(func.count(Artifact.id)).where(Artifact.project_id == p.id),
+                    Artifact,
+                    ctx,
+                )
             )
         ).scalar_one()
         out.append(
@@ -89,6 +129,7 @@ async def list_projects(session: AsyncSession = Depends(get_session)) -> dict[st
 @router.get("/people-projects")
 async def people_projects_matrix(
     session: AsyncSession = Depends(get_session),
+    ctx: AuthContext = Depends(require_member),
 ) -> dict[str, Any]:
     """Person × Project involvement matrix.
 
@@ -110,6 +151,8 @@ async def people_projects_matrix(
         .where(Artifact.project_id.is_not(None))
         .group_by(ArtifactMention.person_id, Artifact.project_id, ArtifactMention.kind)
     )
+    # ArtifactMention has no tenant_id — filter via the joined Artifact.
+    stmt = tenant_where(stmt, Artifact, ctx)
     rows = (await session.execute(stmt)).all()
 
     # Roll up per (person, project) into a dominant role + total count.
@@ -141,17 +184,25 @@ async def people_projects_matrix(
 
 @router.get("/persons")
 async def list_persons(
-    limit: int = 100, session: AsyncSession = Depends(get_session)
+    limit: int = 100,
+    session: AsyncSession = Depends(get_session),
+    ctx: AuthContext = Depends(require_member),
 ) -> dict[str, Any]:
     persons = (
-        await session.execute(select(Person).order_by(Person.id.desc()).limit(limit))
+        await session.execute(
+            tenant_where(select(Person).order_by(Person.id.desc()).limit(limit), Person, ctx)
+        )
     ).scalars().all()
 
     out = []
     for p in persons:
         ids = (
             await session.execute(
-                select(PersonIdentity).where(PersonIdentity.person_id == p.id)
+                tenant_where(
+                    select(PersonIdentity).where(PersonIdentity.person_id == p.id),
+                    PersonIdentity,
+                    ctx,
+                )
             )
         ).scalars().all()
         out.append(

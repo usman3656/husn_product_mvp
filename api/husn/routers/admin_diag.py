@@ -17,6 +17,8 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from husn.auth.deps import AuthContext, require_admin
+from husn.auth.scope import tenant_where
 from husn.connectors.google.backfill import backfill_connection as google_backfill_connection
 from husn.connectors.jira.backfill import backfill_connection as jira_backfill_connection
 from husn.connectors.microsoft.backfill import backfill_connection as microsoft_backfill_connection
@@ -78,6 +80,7 @@ async def backfill_now(
     source: str | None = None,
     connection_id: int | None = None,
     session: AsyncSession = Depends(get_session),
+    ctx: AuthContext = Depends(require_admin),
 ) -> dict[str, Any]:
     """Run backfills inline. Returns per-connection result with full
     exception traceback on failure.
@@ -86,7 +89,7 @@ async def backfill_now(
       source         optional: limit to one source (jira/slack/google/microsoft)
       connection_id  optional: limit to one specific Connection row
     """
-    q = select(Connection)
+    q = tenant_where(select(Connection), Connection, ctx)
     if source is not None:
         q = q.where(Connection.source == source)
     if connection_id is not None:

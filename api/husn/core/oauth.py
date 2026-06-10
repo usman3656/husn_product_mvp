@@ -31,33 +31,55 @@ def _b64url_decode(s: str) -> bytes:
     return base64.urlsafe_b64decode(s + pad)
 
 
-def make_state(*, source: str) -> str:
-    payload = {"ts": int(time.time()), "nonce": secrets.token_urlsafe(16), "source": source}
+def make_state(
+    *, source: str, tenant_id: int | None = None, user_id: int | None = None
+) -> str:
+    """tenant_id/user_id ride the signed state through the provider dance so
+    the callback can stamp the Connection row with its owner workspace
+    (TENANCY.md §5).
+
+    HARD-GATED on AUTH_REQUIRED: during the bridge a logged-in founder
+    reconnecting a tool must NOT stamp a tenant — mixed NULL/real tenant
+    rows would collide with the still-global unique constraints (projects
+    slug, person identities, claim groups) that are only re-keyed per-tenant
+    in migration 0010 at the C4 cutover.
+    """
+    payload: dict = {"ts": int(time.time()), "nonce": secrets.token_urlsafe(16), "source": source}
+    if get_settings().auth_required:
+        if tenant_id is not None:
+            payload["tid"] = tenant_id
+        if user_id is not None:
+            payload["uid"] = user_id
     body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
     sig = hmac.new(_key(), body, hashlib.sha256).digest()
     return f"{_b64url(body)}.{_b64url(sig)}"
 
 
 def verify_state(state: str, *, expected_source: str) -> bool:
+    return parse_state(state, expected_source=expected_source) is not None
+
+
+def parse_state(state: str, *, expected_source: str) -> dict | None:
+    """Verify + decode. Returns the payload dict (may carry tid/uid) or None."""
     try:
         body_b64, sig_b64 = state.split(".", 1)
         body = _b64url_decode(body_b64)
         sig = _b64url_decode(sig_b64)
     except (ValueError, base64.binascii.Error):
-        return False
+        return None
 
     expected_sig = hmac.new(_key(), body, hashlib.sha256).digest()
     if not hmac.compare_digest(sig, expected_sig):
-        return False
+        return None
 
     try:
         payload = json.loads(body)
     except json.JSONDecodeError:
-        return False
+        return None
 
     if payload.get("source") != expected_source:
-        return False
+        return None
     if int(time.time()) - int(payload.get("ts", 0)) > MAX_STATE_AGE_SECONDS:
-        return False
+        return None
 
-    return True
+    return payload

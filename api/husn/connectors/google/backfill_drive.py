@@ -132,6 +132,7 @@ async def _process_file(
             kind="drive_folder",
             external_id=f"{connection.account_id}:drive_folder:{file_id}",
             payload={**f, "scope_folder_id": folder_id},
+            tenant_id=connection.tenant_id,
         )
         await _walk_folder(
             gc, session, connection=connection, folder_id=file_id, counts=counts, depth=depth + 1
@@ -151,6 +152,7 @@ async def _process_file(
             kind="doc",
             external_id=f"{connection.account_id}:doc:{file_id}",
             payload={"drive_metadata": f, "document": doc, "scope_folder_id": folder_id},
+            tenant_id=connection.tenant_id,
         )
         counts["docs"] += 1
         return
@@ -171,6 +173,7 @@ async def _process_file(
             kind="sheet",
             external_id=f"{connection.account_id}:sheet:{file_id}",
             payload={"drive_metadata": f, "spreadsheet": sheet, "scope_folder_id": folder_id},
+            tenant_id=connection.tenant_id,
         )
         counts["sheets"] += 1
         return
@@ -182,5 +185,6 @@ async def _process_file(
         kind="drive_file",
         external_id=f"{connection.account_id}:drive_file:{file_id}",
         payload={**f, "scope_folder_id": folder_id},
+        tenant_id=connection.tenant_id,
     )
     counts["drive_files"] += 1

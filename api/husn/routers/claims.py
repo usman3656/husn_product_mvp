@@ -6,6 +6,8 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from husn.auth.deps import AuthContext, require_member
+from husn.auth.scope import tenant_where
 from husn.db.models import Artifact, Claim
 from husn.db.session import get_session
 
@@ -13,18 +15,25 @@ router = APIRouter(prefix="/api/claims", tags=["claims"])
 
 
 @router.get("/summary")
-async def summary(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+async def summary(
+    session: AsyncSession = Depends(get_session),
+    ctx: AuthContext = Depends(require_member),
+) -> dict[str, Any]:
     """Counts per kind for the graph card."""
     by_kind = await session.execute(
-        select(Claim.kind, func.count(Claim.id)).group_by(Claim.kind)
+        tenant_where(select(Claim.kind, func.count(Claim.id)).group_by(Claim.kind), Claim, ctx)
     )
     counts = {k: c for k, c in by_kind.all()}
-    total = await session.execute(select(func.count(Claim.id)))
+    total = await session.execute(tenant_where(select(func.count(Claim.id)), Claim, ctx))
     pending = await session.execute(
-        select(func.count(Artifact.id)).where(Artifact.claims_extracted_at.is_(None))
+        tenant_where(
+            select(func.count(Artifact.id)).where(Artifact.claims_extracted_at.is_(None)),
+            Artifact,
+            ctx,
+        )
     )
     last_extracted = (
-        await session.execute(select(func.max(Claim.extracted_at)))
+        await session.execute(tenant_where(select(func.max(Claim.extracted_at)), Claim, ctx))
     ).scalar()
     return {
         "total": total.scalar_one(),
@@ -41,6 +50,7 @@ async def list_claims(
     source: str | None = Query(None),
     limit: int = Query(50, ge=1, le=500),
     session: AsyncSession = Depends(get_session),
+    ctx: AuthContext = Depends(require_member),
 ) -> dict[str, Any]:
     stmt = (
         select(Claim, Artifact)
@@ -48,6 +58,7 @@ async def list_claims(
         .order_by(desc(Claim.extracted_at))
         .limit(limit)
     )
+    stmt = tenant_where(stmt, Claim, ctx)
     if project_id is not None:
         stmt = stmt.where(Claim.project_id == project_id)
     if kind:

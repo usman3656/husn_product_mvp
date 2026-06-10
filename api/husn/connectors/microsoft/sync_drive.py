@@ -160,6 +160,7 @@ async def _ingest_item(
             kind="drive_folder",
             external_id=f"{connection.account_id}:drive_folder:{item_id}",
             payload={**item, "scope_folder_id": scope},
+            tenant_id=connection.tenant_id,
         )
         return
 
@@ -184,6 +185,7 @@ async def _ingest_item(
         kind=kind,
         external_id=f"{connection.account_id}:{kind}:{item_id}",
         payload=payload,
+        tenant_id=connection.tenant_id,
     )
     bucket = (
         "office_docs"

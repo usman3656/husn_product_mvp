@@ -9,6 +9,8 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from husn.agent.run_v2 import run_renderer_for_project
+from husn.auth.deps import AuthContext, require_admin, require_member
+from husn.auth.scope import tenant_where
 from husn.core.config import get_settings
 from husn.db.models import AgentRun, Brief, Project
 from husn.db.session import get_session
@@ -17,27 +19,38 @@ router = APIRouter(prefix="/api/agent", tags=["agent"])
 
 
 @router.get("/status")
-async def status(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+async def status(
+    session: AsyncSession = Depends(get_session),
+    ctx: AuthContext = Depends(require_member),
+) -> dict[str, Any]:
     """Latest agent_run per project + global last-run timestamp."""
     s = get_settings()
     last_run = (
-        await session.execute(select(func.max(AgentRun.started_at)))
+        await session.execute(tenant_where(select(func.max(AgentRun.started_at)), AgentRun, ctx))
     ).scalar()
     last_ok = (
         await session.execute(
-            select(func.max(AgentRun.finished_at)).where(AgentRun.status == "ok")
+            tenant_where(
+                select(func.max(AgentRun.finished_at)).where(AgentRun.status == "ok"),
+                AgentRun,
+                ctx,
+            )
         )
     ).scalar()
     total_runs = (
-        await session.execute(select(func.count(AgentRun.id)))
+        await session.execute(tenant_where(select(func.count(AgentRun.id)), AgentRun, ctx))
     ).scalar_one()
     total_briefs = (
-        await session.execute(select(func.count(Brief.id)))
+        await session.execute(tenant_where(select(func.count(Brief.id)), Brief, ctx))
     ).scalar_one()
 
     in_progress = (
         await session.execute(
-            select(func.count(AgentRun.id)).where(AgentRun.status == "running")
+            tenant_where(
+                select(func.count(AgentRun.id)).where(AgentRun.status == "running"),
+                AgentRun,
+                ctx,
+            )
         )
     ).scalar_one()
 
@@ -57,12 +70,16 @@ async def trigger_run(
     project_id: int | None = Query(None, description="Project id; omit for all projects"),
     async_mode: bool = Query(True, description="True: enqueue + return immediately"),
     session: AsyncSession = Depends(get_session),
+    ctx: AuthContext = Depends(require_admin),
 ) -> dict[str, Any]:
     """Trigger an agent run. By default async — queues the job and returns.
     For testing, pass async_mode=false to run inline (will block until done).
     """
     if project_id is not None:
-        if not await session.get(Project, project_id):
+        project = await session.get(Project, project_id)
+        if not project or (
+            ctx.tenant_id is not None and project.tenant_id != ctx.tenant_id
+        ):
             raise HTTPException(404, f"project {project_id} not found")
 
     if async_mode:
@@ -80,7 +97,11 @@ async def trigger_run(
 
     if project_id is None:
         # Run for the first project (default "All work") synchronously
-        first = (await session.execute(select(Project).order_by(Project.id))).scalars().first()
+        first = (
+            await session.execute(
+                tenant_where(select(Project).order_by(Project.id), Project, ctx)
+            )
+        ).scalars().first()
         if first is None:
             raise HTTPException(400, "no projects defined")
         project_id = first.id
@@ -92,10 +113,15 @@ async def trigger_run(
 async def list_runs(
     limit: int = Query(20, ge=1, le=200),
     session: AsyncSession = Depends(get_session),
+    ctx: AuthContext = Depends(require_member),
 ) -> dict[str, Any]:
     rows = (
         await session.execute(
-            select(AgentRun).order_by(desc(AgentRun.started_at)).limit(limit)
+            tenant_where(
+                select(AgentRun).order_by(desc(AgentRun.started_at)).limit(limit),
+                AgentRun,
+                ctx,
+            )
         )
     ).scalars().all()
     return {
@@ -128,8 +154,9 @@ async def list_briefs(
     persona: str | None = Query(None),
     limit: int = Query(20, ge=1, le=200),
     session: AsyncSession = Depends(get_session),
+    ctx: AuthContext = Depends(require_member),
 ) -> dict[str, Any]:
-    stmt = select(Brief).order_by(desc(Brief.generated_at)).limit(limit)
+    stmt = tenant_where(select(Brief).order_by(desc(Brief.generated_at)).limit(limit), Brief, ctx)
     if project_id is not None:
         stmt = stmt.where(Brief.project_id == project_id)
     if persona:

@@ -10,6 +10,8 @@ from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from husn.auth.deps import AuthContext, require_admin
+from husn.auth.scope import tenant_where
 from husn.connectors.microsoft.client import MicrosoftClient
 from husn.connectors.microsoft.listing import (
     get_onedrive_folder_metadata,
@@ -28,9 +30,15 @@ OUTLOOK_FOLDER_SCOPE = "outlook_folder"
 ONEDRIVE_FOLDER_SCOPE = "onedrive_folder"
 
 
-async def _current_connection(session: AsyncSession) -> Connection:
+async def _current_connection(session: AsyncSession, ctx: AuthContext) -> Connection:
     result = await session.execute(
-        select(Connection).where(Connection.source == "microsoft").order_by(Connection.id.desc())
+        tenant_where(
+            select(Connection)
+            .where(Connection.source == "microsoft")
+            .order_by(Connection.id.desc()),
+            Connection,
+            ctx,
+        )
     )
     conn = result.scalar_one_or_none()
     if not conn:
@@ -39,8 +47,11 @@ async def _current_connection(session: AsyncSession) -> Connection:
 
 
 @router.get("/mail-folders")
-async def get_mail_folders(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
-    conn = await _current_connection(session)
+async def get_mail_folders(
+    session: AsyncSession = Depends(get_session),
+    ctx: AuthContext = Depends(require_admin),
+) -> dict[str, Any]:
+    conn = await _current_connection(session, ctx)
     async with MicrosoftClient(connection=conn, session=session) as mc:
         folders = await list_mail_folders(mc)
     return {
@@ -62,9 +73,10 @@ async def get_mail_folders(session: AsyncSession = Depends(get_session)) -> dict
 async def get_onedrive_folders(
     parent_id: str | None = None,
     session: AsyncSession = Depends(get_session),
+    ctx: AuthContext = Depends(require_admin),
 ) -> dict[str, Any]:
     """OneDrive subfolders of `parent_id`. None = root of My Drive."""
-    conn = await _current_connection(session)
+    conn = await _current_connection(session, ctx)
     async with MicrosoftClient(connection=conn, session=session) as mc:
         body = await list_onedrive_folders(mc, parent_id=parent_id)
     out_folders: list[dict[str, Any]] = []
@@ -104,9 +116,11 @@ async def get_onedrive_folders(
 
 @router.get("/folders/{folder_id}/metadata")
 async def folder_metadata(
-    folder_id: str, session: AsyncSession = Depends(get_session)
+    folder_id: str,
+    session: AsyncSession = Depends(get_session),
+    ctx: AuthContext = Depends(require_admin),
 ) -> dict[str, Any]:
-    conn = await _current_connection(session)
+    conn = await _current_connection(session, ctx)
     async with MicrosoftClient(connection=conn, session=session) as mc:
         try:
             meta = await get_onedrive_folder_metadata(mc, folder_id)
@@ -120,8 +134,11 @@ async def folder_metadata(
 
 
 @router.get("/allowlist")
-async def get_allowlist(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
-    project = await get_or_create_default_project(session)
+async def get_allowlist(
+    session: AsyncSession = Depends(get_session),
+    ctx: AuthContext = Depends(require_admin),
+) -> dict[str, Any]:
+    project = await get_or_create_default_project(session, tenant_id=ctx.tenant_id)
     result = await session.execute(
         select(ProjectSource).where(
             ProjectSource.project_id == project.id,
@@ -143,9 +160,11 @@ class AllowlistBody(BaseModel):
 
 @router.post("/allowlist")
 async def set_allowlist(
-    body: AllowlistBody, session: AsyncSession = Depends(get_session)
+    body: AllowlistBody,
+    session: AsyncSession = Depends(get_session),
+    ctx: AuthContext = Depends(require_admin),
 ) -> dict[str, Any]:
-    project = await get_or_create_default_project(session)
+    project = await get_or_create_default_project(session, tenant_id=ctx.tenant_id)
     await session.execute(
         delete(ProjectSource).where(
             ProjectSource.project_id == project.id,

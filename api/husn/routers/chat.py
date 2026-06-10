@@ -9,6 +9,7 @@ from sqlalchemy import asc, desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from husn.agent.chat import CHAT_HISTORY_TURNS, run_chat_turn
+from husn.auth.deps import AuthContext, require_member
 from husn.db.models import ChatMessage, ChatSession, Project
 from husn.db.session import get_session
 from husn.graph.projects import get_or_create_default_project
@@ -16,13 +17,38 @@ from husn.graph.projects import get_or_create_default_project
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
 
+async def _get_owned_session(
+    session: AsyncSession, session_id: int, ctx: AuthContext
+) -> ChatSession:
+    """Fetch a chat session the caller owns, or 404.
+
+    Chat is PER-USER (anti-monitoring, TENANCY.md §9): wrong tenant OR wrong
+    user → 404, with no admin override. Bridge mode (tenant_id None) skips
+    the ownership check so pre-cutover behavior is unchanged.
+    """
+    sess = await session.get(ChatSession, session_id)
+    if not sess:
+        raise HTTPException(404, "session not found")
+    if ctx.tenant_id is not None and (
+        sess.tenant_id != ctx.tenant_id or sess.user_id != ctx.user_id
+    ):
+        raise HTTPException(404, "session not found")
+    return sess
+
+
 @router.get("/sessions")
-async def list_sessions(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
-    rows = (
-        await session.execute(
-            select(ChatSession).order_by(desc(ChatSession.updated_at)).limit(50)
+async def list_sessions(
+    session: AsyncSession = Depends(get_session),
+    ctx: AuthContext = Depends(require_member),
+) -> dict[str, Any]:
+    stmt = select(ChatSession).order_by(desc(ChatSession.updated_at)).limit(50)
+    if ctx.tenant_id is not None:
+        # Per-user: members (and admins — no override) see only their own.
+        stmt = stmt.where(
+            ChatSession.tenant_id == ctx.tenant_id,
+            ChatSession.user_id == ctx.user_id,
         )
-    ).scalars().all()
+    rows = (await session.execute(stmt)).scalars().all()
     return {
         "count": len(rows),
         "items": [
@@ -45,16 +71,27 @@ class CreateSessionBody(BaseModel):
 
 @router.post("/sessions")
 async def create_session(
-    body: CreateSessionBody, session: AsyncSession = Depends(get_session)
+    body: CreateSessionBody,
+    session: AsyncSession = Depends(get_session),
+    ctx: AuthContext = Depends(require_member),
 ) -> dict[str, Any]:
     project_id = body.project_id
     if project_id is None:
-        project = await get_or_create_default_project(session)
+        project = await get_or_create_default_project(session, tenant_id=ctx.tenant_id)
         project_id = project.id
-    elif not await session.get(Project, project_id):
-        raise HTTPException(404, f"project {project_id} not found")
+    else:
+        project = await session.get(Project, project_id)
+        if not project or (
+            ctx.tenant_id is not None and project.tenant_id != ctx.tenant_id
+        ):
+            raise HTTPException(404, f"project {project_id} not found")
 
-    sess = ChatSession(project_id=project_id, title=body.title or "(untitled)")
+    sess = ChatSession(
+        project_id=project_id,
+        title=body.title or "(untitled)",
+        tenant_id=ctx.tenant_id,
+        user_id=ctx.user_id,
+    )
     session.add(sess)
     await session.commit()
     return {"id": sess.id, "project_id": sess.project_id, "title": sess.title}
@@ -62,11 +99,11 @@ async def create_session(
 
 @router.delete("/sessions/{session_id}")
 async def delete_session(
-    session_id: int, session: AsyncSession = Depends(get_session)
+    session_id: int,
+    session: AsyncSession = Depends(get_session),
+    ctx: AuthContext = Depends(require_member),
 ) -> dict[str, Any]:
-    sess = await session.get(ChatSession, session_id)
-    if not sess:
-        raise HTTPException(404, "session not found")
+    sess = await _get_owned_session(session, session_id, ctx)
     # Delete messages too (no FK CASCADE on the table; do it explicitly)
     msgs = (
         await session.execute(select(ChatMessage).where(ChatMessage.session_id == session_id))
@@ -80,11 +117,11 @@ async def delete_session(
 
 @router.get("/sessions/{session_id}/messages")
 async def list_messages(
-    session_id: int, session: AsyncSession = Depends(get_session)
+    session_id: int,
+    session: AsyncSession = Depends(get_session),
+    ctx: AuthContext = Depends(require_member),
 ) -> dict[str, Any]:
-    sess = await session.get(ChatSession, session_id)
-    if not sess:
-        raise HTTPException(404, "session not found")
+    sess = await _get_owned_session(session, session_id, ctx)
     rows = (
         await session.execute(
             select(ChatMessage)
@@ -125,13 +162,12 @@ async def send_message(
     session_id: int,
     body: SendMessageBody,
     session: AsyncSession = Depends(get_session),
+    ctx: AuthContext = Depends(require_member),
 ) -> dict[str, Any]:
     """User sends a message → server saves it, builds dossier + recent history,
     calls the LLM, saves the assistant reply, returns the assistant turn.
     """
-    sess = await session.get(ChatSession, session_id)
-    if not sess:
-        raise HTTPException(404, "session not found")
+    sess = await _get_owned_session(session, session_id, ctx)
     if not body.content.strip():
         raise HTTPException(400, "empty message")
 
@@ -166,7 +202,7 @@ async def send_message(
     try:
         result = await run_chat_turn(
             session,
-            project_id=sess.project_id or (await get_or_create_default_project(session)).id,
+            project_id=sess.project_id or (await get_or_create_default_project(session, tenant_id=ctx.tenant_id)).id,
             history=history,
             user_message=body.content.strip(),
         )

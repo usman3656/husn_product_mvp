@@ -162,6 +162,7 @@ async def _process_history_record(
             kind="email",
             external_id=f"{connection.account_id}:email:{full.get('id')}",
             payload=full,
+            tenant_id=connection.tenant_id,
         )
         counts["messages"] += 1
 

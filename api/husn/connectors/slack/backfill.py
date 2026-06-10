@@ -37,6 +37,7 @@ async def backfill_connection(
                     kind="user",
                     external_id=f"{connection.account_id}:user:{u['id']}",
                     payload=u,
+                    tenant_id=connection.tenant_id,
                 )
                 counts["users"] += 1
             cursor = (resp.get("response_metadata") or {}).get("next_cursor") or None
@@ -56,6 +57,7 @@ async def backfill_connection(
                     kind="channel",
                     external_id=f"{connection.account_id}:channel:{ch['id']}",
                     payload=ch,
+                    tenant_id=connection.tenant_id,
                 )
                 counts["channels"] += 1
             cursor = (resp.get("response_metadata") or {}).get("next_cursor") or None
@@ -109,6 +111,7 @@ async def _backfill_channel_messages(
                 kind="message",
                 external_id=f"{connection.account_id}:message:{channel_id}:{msg['ts']}",
                 payload={**msg, "channel_id": channel_id, "channel_name": channel.get("name")},
+                tenant_id=connection.tenant_id,
             )
             counts["messages"] += 1
             ingested += 1

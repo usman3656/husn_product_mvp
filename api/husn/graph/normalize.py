@@ -8,11 +8,12 @@ up in batches and run the matching normalizer. Re-runnable on schema changes:
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from husn.core.logging import log
 from husn.db.models import Artifact, Connection, RawArtifact
+from husn.graph.tenancy_context import current_tenant_id
 from husn.graph.normalizers.google import (
     normalize_google_doc,
     normalize_google_drive_file,
@@ -84,9 +85,6 @@ async def normalize_pending(session: AsyncSession, batch_size: int = 200) -> dic
       2. Pull raw_artifacts that have no matching artifacts row, oldest first.
       3. Dispatch to the per-source normalizer; skip + log unknown kinds.
     """
-    project = await get_or_create_default_project(session)
-    new_scopes = await auto_scope_from_raw_artifacts(session, project.id)
-
     # LEFT JOIN to find raw_artifacts with no artifacts row yet
     stmt = (
         select(RawArtifact)
@@ -98,6 +96,24 @@ async def normalize_pending(session: AsyncSession, batch_size: int = 200) -> dic
     result = await session.execute(stmt)
     pending = list(result.scalars().all())
 
+    # Default project + scope sweep is PER-TENANT (TENANCY.md C3). Bridge
+    # rows carry tenant_id None and reproduce the single global 'All work'.
+    # Each tenant's setup is isolated: one tenant's constraint violation must
+    # never wedge the whole normalize job for everyone.
+    new_scopes = 0
+    for t_id in {r.tenant_id for r in pending} or {None}:
+        try:
+            project = await get_or_create_default_project(session, tenant_id=t_id)
+            new_scopes += await auto_scope_from_raw_artifacts(session, project.id, tenant_id=t_id)
+        except Exception as e:
+            await session.rollback()
+            log.warning(
+                "husn.graph.normalize.project_setup_failed",
+                tenant_id=t_id,
+                error=type(e).__name__,
+                msg=str(e)[:200],
+            )
+
     counts = {"considered": len(pending), "normalized": 0, "skipped": 0, "scopes_added": new_scopes}
     for raw in pending:
         fn = _DISPATCH.get((raw.source, raw.kind))
@@ -107,12 +123,25 @@ async def normalize_pending(session: AsyncSession, batch_size: int = 200) -> dic
         # Capture identifying fields BEFORE the call so we can log them even
         # if the session ends up in a rolled-back state after a failure.
         raw_id, raw_source, raw_kind = raw.id, raw.source, raw.kind
+        raw_tenant_id = raw.tenant_id
+        # Tenancy context: identity resolution inside the normalizer scopes
+        # person lookup/create to this tenant (TENANCY.md C3).
+        token = current_tenant_id.set(raw_tenant_id)
         try:
             if raw_source == "jira" and raw_kind == "issue":
                 site_url = await _site_url_for(session, raw)
                 await fn(session, raw, site_url=site_url)
             else:
                 await fn(session, raw)
+            # Central tenant stamp — covers every normalizer without touching
+            # their signatures: the Artifact row for this raw now exists in
+            # the session; stamp it from the raw row.
+            if raw_tenant_id is not None:
+                await session.execute(
+                    update(Artifact)
+                    .where(Artifact.raw_artifact_id == raw_id)
+                    .values(tenant_id=raw_tenant_id)
+                )
             await session.flush()  # surface PK violations now, per-row
             counts["normalized"] += 1
         except Exception as e:
@@ -127,6 +156,8 @@ async def normalize_pending(session: AsyncSession, batch_size: int = 200) -> dic
                 msg=str(e)[:200],
             )
             counts["skipped"] += 1
+        finally:
+            current_tenant_id.reset(token)
 
     await session.commit()
     if counts["considered"] or counts["scopes_added"]:

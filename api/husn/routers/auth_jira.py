@@ -1,4 +1,9 @@
-"""Jira (Atlassian) OAuth 2.0 (3LO) routes."""
+"""Jira (Atlassian) OAuth 2.0 (3LO) routes.
+
+Connector OAuth is an ADMIN action (TENANCY.md D5): /start requires an
+admin session; the workspace rides the signed state through the provider
+dance; /callback stamps tenant_id on the Connection row.
+"""
 
 from arq import create_pool
 from arq.connections import RedisSettings
@@ -8,6 +13,8 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from husn.auth.deps import AuthContext, require_admin
+from husn.auth.scope import tenant_where
 from husn.connectors.jira.oauth import (
     build_authorize_url,
     exchange_code,
@@ -16,7 +23,7 @@ from husn.connectors.jira.oauth import (
 )
 from husn.core.config import get_settings
 from husn.core.logging import log
-from husn.core.oauth import make_state, verify_state
+from husn.core.oauth import make_state, parse_state
 from husn.db.models import Connection
 from husn.db.session import get_session
 
@@ -24,11 +31,11 @@ router = APIRouter(prefix="/auth/jira", tags=["auth"])
 
 
 @router.get("/start")
-async def start() -> RedirectResponse:
+async def start(ctx: AuthContext = Depends(require_admin)) -> RedirectResponse:
     s = get_settings()
     if not s.jira_client_id or not s.jira_client_secret:
         raise HTTPException(500, "JIRA_CLIENT_ID / JIRA_CLIENT_SECRET not configured")
-    state = make_state(source="jira")
+    state = make_state(source="jira", tenant_id=ctx.tenant_id, user_id=ctx.user_id)
     url = build_authorize_url(
         client_id=s.jira_client_id, redirect_uri=s.jira_redirect_uri_resolved, state=state
     )
@@ -50,8 +57,11 @@ async def callback(
             status_code=400,
         )
 
-    if not verify_state(state, expected_source="jira"):
+    state_payload = parse_state(state, expected_source="jira")
+    if state_payload is None:
         return HTMLResponse(_page("<h1>Invalid or expired state</h1><p>Try again.</p>"), status_code=400)
+    # None during the AUTH_REQUIRED=0 bridge; the workspace id after C4.
+    tenant_id = state_payload.get("tid")
 
     s = get_settings()
     try:
@@ -89,9 +99,13 @@ async def callback(
         site_name = r.get("name")
         if not cloud_id:
             continue
+        # NOTE: the conflict target is still the GLOBAL (source, account_id)
+        # constraint until migration 0010 re-keys it to (tenant_id, source,
+        # account_id) at the C4 cutover — the C4 commit updates this name.
         stmt = (
             pg_insert(Connection)
             .values(
+                tenant_id=tenant_id,
                 source="jira",
                 account_id=str(cloud_id),
                 account_label=site_name or site_url,
@@ -104,6 +118,7 @@ async def callback(
             .on_conflict_do_update(
                 constraint="uq_connection_source_account",
                 set_={
+                    "tenant_id": tenant_id,
                     "access_token": access_token,
                     "refresh_token": refresh_token,
                     "token_expires_at": expires_at_from(expires_in),
@@ -143,8 +158,12 @@ async def callback(
 
 
 @router.get("/status")
-async def status(session: AsyncSession = Depends(get_session)) -> dict:
-    result = await session.execute(select(Connection).where(Connection.source == "jira"))
+async def status(
+    session: AsyncSession = Depends(get_session),
+    ctx: AuthContext = Depends(require_admin),
+) -> dict:
+    stmt = tenant_where(select(Connection).where(Connection.source == "jira"), Connection, ctx)
+    result = await session.execute(stmt)
     rows = result.scalars().all()
     return {
         "connections": [

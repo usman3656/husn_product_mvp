@@ -107,6 +107,7 @@ async def backfill_gmail(session: AsyncSession, connection: Connection) -> dict[
                     kind="email",
                     external_id=f"{connection.account_id}:email:{msg.get('id')}",
                     payload=msg,
+                    tenant_id=connection.tenant_id,
                 )
                 counts["messages"] += 1
             await session.commit()  # commit per-label so partial progress sticks

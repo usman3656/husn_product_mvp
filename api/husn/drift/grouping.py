@@ -52,21 +52,27 @@ def family_key_for(kind: str, key: str) -> str:
 
 
 async def get_or_create_group(
-    session: AsyncSession, *, project_id: int | None, kind: str, key: str
+    session: AsyncSession,
+    *,
+    project_id: int | None,
+    kind: str,
+    key: str,
+    tenant_id: int | None = None,
 ) -> ClaimGroup:
     # NULL project_id can't use a uniqueness check directly in some dialects;
     # we read-then-insert with conflict-do-nothing for safety.
-    result = await session.execute(
-        select(ClaimGroup).where(
-            ClaimGroup.project_id.is_(project_id) if project_id is None else ClaimGroup.project_id == project_id,
-            ClaimGroup.kind == kind,
-            ClaimGroup.key == key,
-        )
+    q = select(ClaimGroup).where(
+        ClaimGroup.project_id.is_(project_id) if project_id is None else ClaimGroup.project_id == project_id,
+        ClaimGroup.kind == kind,
+        ClaimGroup.key == key,
     )
+    if tenant_id is not None:
+        q = q.where(ClaimGroup.tenant_id == tenant_id)
+    result = await session.execute(q)
     grp = result.scalar_one_or_none()
     if grp:
         return grp
-    grp = ClaimGroup(project_id=project_id, kind=kind, key=key)
+    grp = ClaimGroup(tenant_id=tenant_id, project_id=project_id, kind=kind, key=key)
     session.add(grp)
     await session.flush()
     return grp
@@ -89,18 +95,26 @@ async def assign_unassigned_claims(session: AsyncSession, batch_size: int = 1000
     counts = {"considered": len(rows), "assigned": 0, "groups_created": 0}
     for claim in rows:
         family = family_key_for(claim.kind, claim.key)
-        existing = await session.execute(
-            select(ClaimGroup).where(
-                ClaimGroup.project_id.is_(claim.project_id)
-                if claim.project_id is None
-                else ClaimGroup.project_id == claim.project_id,
-                ClaimGroup.kind == claim.kind,
-                ClaimGroup.key == family,
-            )
+        # Group identity is per-tenant (TENANCY.md C3): two companies with a
+        # NULL-project "release" group must never share a row.
+        group_q = select(ClaimGroup).where(
+            ClaimGroup.project_id.is_(claim.project_id)
+            if claim.project_id is None
+            else ClaimGroup.project_id == claim.project_id,
+            ClaimGroup.kind == claim.kind,
+            ClaimGroup.key == family,
         )
+        if claim.tenant_id is not None:
+            group_q = group_q.where(ClaimGroup.tenant_id == claim.tenant_id)
+        existing = await session.execute(group_q)
         grp = existing.scalar_one_or_none()
         if grp is None:
-            grp = ClaimGroup(project_id=claim.project_id, kind=claim.kind, key=family)
+            grp = ClaimGroup(
+                tenant_id=claim.tenant_id,
+                project_id=claim.project_id,
+                kind=claim.kind,
+                key=family,
+            )
             session.add(grp)
             await session.flush()
             counts["groups_created"] += 1

@@ -26,6 +26,7 @@ async def backfill_connection(session: AsyncSession, connection: Connection) -> 
                 kind="project",
                 external_id=f"{connection.account_id}:project:{p['id']}",
                 payload=p,
+                tenant_id=connection.tenant_id,
             )
             counts["projects"] += 1
 
@@ -60,6 +61,7 @@ async def _backfill_issues(
                 kind="issue",
                 external_id=f"{connection.account_id}:issue:{issue['id']}",
                 payload=issue,
+                tenant_id=connection.tenant_id,
             )
             counts["issues"] += 1
         next_token = page.get("nextPageToken")

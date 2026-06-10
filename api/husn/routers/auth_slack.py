@@ -8,10 +8,12 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from husn.auth.deps import AuthContext, require_admin
+from husn.auth.scope import tenant_where
 from husn.connectors.slack.oauth import build_authorize_url, exchange_code
 from husn.core.config import get_settings
 from husn.core.logging import log
-from husn.core.oauth import make_state, verify_state
+from husn.core.oauth import make_state, parse_state
 from husn.db.models import Connection
 from husn.db.session import get_session
 
@@ -19,11 +21,11 @@ router = APIRouter(prefix="/auth/slack", tags=["auth"])
 
 
 @router.get("/start")
-async def start() -> RedirectResponse:
+async def start(ctx: AuthContext = Depends(require_admin)) -> RedirectResponse:
     s = get_settings()
     if not s.slack_client_id or not s.slack_client_secret:
         raise HTTPException(500, "SLACK_CLIENT_ID / SLACK_CLIENT_SECRET not configured")
-    state = make_state(source="slack")
+    state = make_state(source="slack", tenant_id=ctx.tenant_id, user_id=ctx.user_id)
     url = build_authorize_url(
         client_id=s.slack_client_id, redirect_uri=s.slack_redirect_uri_resolved, state=state
     )
@@ -44,8 +46,11 @@ async def callback(
     if not code or not state:
         return HTMLResponse(_page("<h1>Missing code/state</h1>"), status_code=400)
 
-    if not verify_state(state, expected_source="slack"):
+    state_payload = parse_state(state, expected_source="slack")
+    if state_payload is None:
         return HTMLResponse(_page("<h1>Invalid or expired state</h1><p>Try again.</p>"), status_code=400)
+    # None during the AUTH_REQUIRED=0 bridge; the workspace id after C4.
+    tenant_id = state_payload.get("tid")
 
     s = get_settings()
     try:
@@ -71,9 +76,13 @@ async def callback(
     if not bot_token or not team_id:
         return HTMLResponse(_page(f"<h1>Unexpected token response</h1><pre>{token}</pre>"), status_code=500)
 
+    # NOTE: the conflict target is still the GLOBAL (source, account_id)
+    # constraint until migration 0010 re-keys it to (tenant_id, source,
+    # account_id) at the C4 cutover — the C4 commit updates this name.
     stmt = (
         pg_insert(Connection)
         .values(
+            tenant_id=tenant_id,
             source="slack",
             account_id=str(team_id),
             account_label=team_name or team_id,
@@ -86,6 +95,7 @@ async def callback(
         .on_conflict_do_update(
             constraint="uq_connection_source_account",
             set_={
+                "tenant_id": tenant_id,
                 "access_token": bot_token,
                 "scopes": scope,
                 "account_label": team_name or team_id,
@@ -117,8 +127,12 @@ async def callback(
 
 
 @router.get("/status")
-async def status(session: AsyncSession = Depends(get_session)) -> dict:
-    result = await session.execute(select(Connection).where(Connection.source == "slack"))
+async def status(
+    session: AsyncSession = Depends(get_session),
+    ctx: AuthContext = Depends(require_admin),
+) -> dict:
+    stmt = tenant_where(select(Connection).where(Connection.source == "slack"), Connection, ctx)
+    result = await session.execute(stmt)
     rows = result.scalars().all()
     return {
         "connections": [

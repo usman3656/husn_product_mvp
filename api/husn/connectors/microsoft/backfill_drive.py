@@ -125,6 +125,7 @@ async def _walk_folder(
                     kind="drive_folder",
                     external_id=f"{connection.account_id}:drive_folder:{item_id}",
                     payload={**item, "scope_folder_id": folder_id},
+                    tenant_id=connection.tenant_id,
                 )
                 await _walk_folder(
                     mc,
@@ -144,6 +145,7 @@ async def _walk_folder(
                 kind=kind,
                 external_id=f"{connection.account_id}:{kind}:{item_id}",
                 payload={**item, "scope_folder_id": folder_id},
+                tenant_id=connection.tenant_id,
             )
             count_key = (
                 "office_docs"

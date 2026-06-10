@@ -74,6 +74,7 @@ async def backfill_outlook(session: AsyncSession, connection: Connection) -> dic
                         kind="email",
                         external_id=f"{connection.account_id}:email:{msg_id}",
                         payload={**msg, "folder_id": folder_id},
+                        tenant_id=connection.tenant_id,
                     )
                     counts["messages"] += 1
                     ingested_for_folder += 1

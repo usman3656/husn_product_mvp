@@ -86,6 +86,7 @@ async def extract_pending(session: AsyncSession, batch_size: int = 200) -> dict[
                     extractor_id=ext.id,
                     extractor_version=ext.version,
                     candidate=c,
+                    tenant_id=artifact.tenant_id,
                 )
                 counts["extracted_claims"] += 1
         artifact.claims_extracted_at = datetime.now(UTC)

@@ -6,6 +6,8 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from husn.auth.deps import AuthContext, require_member
+from husn.auth.scope import tenant_where
 from husn.db.models import RawArtifact
 from husn.db.session import get_session
 
@@ -18,8 +20,11 @@ async def list_artifacts(
     kind: str | None = Query(None, description="filter by kind (issue/project/message/email/...)"),
     limit: int = Query(50, ge=1, le=500),
     session: AsyncSession = Depends(get_session),
+    ctx: AuthContext = Depends(require_member),
 ) -> dict[str, Any]:
-    stmt = select(RawArtifact).order_by(desc(RawArtifact.fetched_at)).limit(limit)
+    stmt = tenant_where(
+        select(RawArtifact).order_by(desc(RawArtifact.fetched_at)).limit(limit), RawArtifact, ctx
+    )
     if source:
         stmt = stmt.where(RawArtifact.source == source)
     if kind:

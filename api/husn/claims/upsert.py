@@ -15,10 +15,14 @@ async def upsert_claim(
     extractor_id: str,
     extractor_version: int,
     candidate: ClaimCandidate,
+    tenant_id: int | None = None,
 ) -> int:
+    """tenant_id derives from the source Artifact (TENANCY.md C3); None
+    during the AUTH_REQUIRED=0 bridge."""
     stmt = (
         pg_insert(Claim)
         .values(
+            tenant_id=tenant_id,
             project_id=project_id,
             source_artifact_id=source_artifact_id,
             kind=candidate.kind,
@@ -38,6 +42,7 @@ async def upsert_claim(
                 "confidence": candidate.confidence,
                 "source_anchor": candidate.source_anchor,
                 "project_id": project_id,
+                "tenant_id": tenant_id,
             },
         )
         .returning(Claim.id)

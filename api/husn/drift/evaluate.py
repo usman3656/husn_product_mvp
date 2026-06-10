@@ -122,6 +122,7 @@ async def _upsert_finding(
     """
     if existing is None:
         finding = Finding(
+            tenant_id=group.tenant_id,
             rule_id=rule.rule_id,
             claim_group_id=group.id,
             project_id=group.project_id,

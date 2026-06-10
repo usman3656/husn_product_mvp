@@ -158,6 +158,7 @@ async def _process_change(
             kind="drive_folder",
             external_id=f"{connection.account_id}:drive_folder:{file_id}",
             payload={**file, "scope_folder_id": scope_folder_id},
+            tenant_id=connection.tenant_id,
         )
         return
 
@@ -174,6 +175,7 @@ async def _process_change(
             kind="doc",
             external_id=f"{connection.account_id}:doc:{file_id}",
             payload={"drive_metadata": file, "document": doc, "scope_folder_id": scope_folder_id},
+            tenant_id=connection.tenant_id,
         )
         counts["docs"] += 1
         return
@@ -194,6 +196,7 @@ async def _process_change(
             kind="sheet",
             external_id=f"{connection.account_id}:sheet:{file_id}",
             payload={"drive_metadata": file, "spreadsheet": sheet, "scope_folder_id": scope_folder_id},
+            tenant_id=connection.tenant_id,
         )
         counts["sheets"] += 1
         return
@@ -205,6 +208,7 @@ async def _process_change(
         kind="drive_file",
         external_id=f"{connection.account_id}:drive_file:{file_id}",
         payload={**file, "scope_folder_id": scope_folder_id},
+        tenant_id=connection.tenant_id,
     )
     counts["drive_files"] += 1
 

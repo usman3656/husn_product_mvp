@@ -6,6 +6,8 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from husn.auth.deps import AuthContext, require_member
+from husn.auth.scope import tenant_where
 from husn.db.models import RawArtifact
 from husn.db.session import get_session
 
@@ -13,21 +15,32 @@ router = APIRouter(prefix="/api/slack", tags=["slack"])
 
 
 @router.get("/feed")
-async def feed(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+async def feed(
+    session: AsyncSession = Depends(get_session),
+    ctx: AuthContext = Depends(require_member),
+) -> dict[str, Any]:
     """Return channels + their messages, grouped, sorted newest-message-first."""
-    ch_stmt = (
+    ch_stmt = tenant_where(
         select(RawArtifact)
         .where(RawArtifact.source == "slack", RawArtifact.kind == "channel")
-        .order_by(RawArtifact.fetched_at.desc())
+        .order_by(RawArtifact.fetched_at.desc()),
+        RawArtifact,
+        ctx,
     )
-    msg_stmt = (
+    msg_stmt = tenant_where(
         select(RawArtifact)
         .where(RawArtifact.source == "slack", RawArtifact.kind == "message")
         .order_by(RawArtifact.fetched_at.desc())
-        .limit(2000)
+        .limit(2000),
+        RawArtifact,
+        ctx,
     )
-    user_stmt = select(RawArtifact).where(
-        RawArtifact.source == "slack", RawArtifact.kind == "user"
+    user_stmt = tenant_where(
+        select(RawArtifact).where(
+            RawArtifact.source == "slack", RawArtifact.kind == "user"
+        ),
+        RawArtifact,
+        ctx,
     )
 
     channels = (await session.execute(ch_stmt)).scalars().all()
