@@ -28,3 +28,4 @@ postgres_data/
 redis_data/
 .claude/audit.log
 .claude/settings.local.json
+.last-deployed-sha
