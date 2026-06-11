@@ -1,7 +1,7 @@
 import Link from "next/link";
 
 import { OrgMatrix, type MatrixEdge, type MatrixPerson, type MatrixProject } from "@/components/org-matrix";
-import { FETCH_INIT } from "@/lib/fetch-init";
+import { serverJson } from "@/lib/api";
 
 /* ============================================================
    Organization — the Organizational Digital Twin.
@@ -17,8 +17,6 @@ import { FETCH_INIT } from "@/lib/fetch-init";
    Tone: editorial, calm, premium. No metric blocks. No counts
    of "signals". No risk language. This page is not a briefing.
    ============================================================ */
-
-const SERVER_API_URL = process.env.API_URL ?? "http://api:8000";
 
 type Project = {
   id: number; slug: string; name: string;
@@ -45,19 +43,15 @@ type ConnectionRow = {
   artifact_count: number;
 };
 
-async function safeFetch<T>(url: string): Promise<T | null> {
-  try { const r = await fetch(url, FETCH_INIT); return r.ok ? ((await r.json()) as T) : null; } catch { return null; }
-}
-
 const SOURCE_LABEL: Record<string, string> = { jira: "Jira", slack: "Slack", google: "Google", microsoft: "Microsoft" };
 
 export default async function OrganizationPage() {
   const [projectsRes, personsRes, edgesRes, findingsRes, connectionsRes] = await Promise.all([
-    safeFetch<{ projects: Project[] }>(`${SERVER_API_URL}/api/graph/projects`),
-    safeFetch<{ persons: Person[] }>(`${SERVER_API_URL}/api/graph/persons?limit=200`),
-    safeFetch<{ items: PeopleProjectEdge[] }>(`${SERVER_API_URL}/api/graph/people-projects`),
-    safeFetch<{ items: Finding[] }>(`${SERVER_API_URL}/api/findings?status=open&limit=200`),
-    safeFetch<{ items: ConnectionRow[] }>(`${SERVER_API_URL}/api/connections`),
+    serverJson<{ projects: Project[] }>("/api/graph/projects"),
+    serverJson<{ persons: Person[] }>("/api/graph/persons?limit=200"),
+    serverJson<{ items: PeopleProjectEdge[] }>("/api/graph/people-projects"),
+    serverJson<{ items: Finding[] }>("/api/findings?status=open&limit=200"),
+    serverJson<{ items: ConnectionRow[] }>("/api/connections"),
   ]);
 
   const projects = projectsRes?.projects ?? [];

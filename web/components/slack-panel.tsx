@@ -1,8 +1,7 @@
 import { CardHeader, EmptyState, Pill, Tile } from "@/components/ui";
-import { FETCH_INIT } from "@/lib/fetch-init";
+import { serverFetch } from "@/lib/api";
 import { DisconnectButton } from "@/components/disconnect-button";
 
-const SERVER_API_URL = process.env.API_URL ?? "http://api:8000";
 const BROWSER_API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 type SlackMessage = {
@@ -31,7 +30,7 @@ type Status = { connections: { id: number; team_name: string | null; account_lab
 
 async function fetchFeed(): Promise<Feed> {
   try {
-    const res = await fetch(`${SERVER_API_URL}/api/slack/feed`, FETCH_INIT);
+    const res = await serverFetch("/api/slack/feed");
     if (!res.ok) return { channels: [], total_messages: 0 };
     return (await res.json()) as Feed;
   } catch {
@@ -41,7 +40,7 @@ async function fetchFeed(): Promise<Feed> {
 
 async function fetchStatus(): Promise<Status> {
   try {
-    const res = await fetch(`${SERVER_API_URL}/auth/slack/status`, FETCH_INIT);
+    const res = await serverFetch("/auth/slack/status");
     if (!res.ok) return { connections: [] };
     return (await res.json()) as Status;
   } catch {

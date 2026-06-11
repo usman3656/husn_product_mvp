@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-import { FETCH_INIT } from "@/lib/fetch-init";
+import { serverJson } from "@/lib/api";
 
 /* ============================================================
    Explore — organized by understanding, not by issue type.
@@ -8,8 +8,6 @@ import { FETCH_INIT } from "@/lib/fetch-init";
    Dependencies · Decisions · Resolved. Each lens is a way of
    reading the same underlying activity, not a separate inbox.
    ============================================================ */
-
-const SERVER_API_URL = process.env.API_URL ?? "http://api:8000";
 
 type Finding = {
   id: number;
@@ -24,10 +22,6 @@ type Finding = {
 
 type Project = { id: number; slug: string; name: string; artifact_count: number; scopes: { source: string }[] };
 type Person = { id: number; primary_name: string | null; primary_email: string | null; identities: { source: string }[] };
-
-async function safeFetch<T>(url: string): Promise<T | null> {
-  try { const r = await fetch(url, FETCH_INIT); return r.ok ? ((await r.json()) as T) : null; } catch { return null; }
-}
 
 const SOURCE_LABEL: Record<string, string> = { jira: "Jira", slack: "Slack", google: "Google", microsoft: "Microsoft" };
 
@@ -79,9 +73,9 @@ export default async function ExplorePage({ searchParams }: { searchParams: Prom
   const lens: Lens = LENSES.some((l) => l.key === sp.lens) ? (sp.lens as Lens) : "projects";
 
   const [findingsRes, projectsRes, personsRes] = await Promise.all([
-    safeFetch<{ items: Finding[] }>(`${SERVER_API_URL}/api/findings?status=all&limit=200`),
-    safeFetch<{ projects: Project[] }>(`${SERVER_API_URL}/api/graph/projects`),
-    safeFetch<{ persons: Person[] }>(`${SERVER_API_URL}/api/graph/persons?limit=200`),
+    serverJson<{ items: Finding[] }>("/api/findings?status=all&limit=200"),
+    serverJson<{ projects: Project[] }>("/api/graph/projects"),
+    serverJson<{ persons: Person[] }>("/api/graph/persons?limit=200"),
   ]);
 
   const allFindings = (findingsRes?.items ?? []);

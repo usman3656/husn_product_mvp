@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-const BROWSER_API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+import { clientFetch } from "@/lib/api";
 
 export function RunButtonClient({ inProgress }: { inProgress: boolean }) {
   const [busy, setBusy] = useState(false);
@@ -12,7 +12,7 @@ export function RunButtonClient({ inProgress }: { inProgress: boolean }) {
     setBusy(true);
     setMessage(null);
     try {
-      const r = await fetch(`${BROWSER_API_URL}/api/agent/run?async_mode=true`, {
+      const r = await clientFetch("/api/agent/run?async_mode=true", {
         method: "POST",
       });
       if (!r.ok) {

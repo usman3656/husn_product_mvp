@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 
-const BROWSER_API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+import { clientFetch, fetchMe, type Me } from "@/lib/api";
 
 type ConnectionRow = {
   id: number;
@@ -60,10 +60,15 @@ export function ConnectionsList() {
   const [items, setItems] = useState<ConnectionRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<number | null>(null);
+  const [me, setMe] = useState<Me | null>(null);
+
+  // Members get a read-only view: no disconnect, no reset (TENANCY.md D5).
+  const isAdmin =
+    !me?.auth_required || me?.workspace?.role === "owner" || me?.workspace?.role === "admin";
 
   async function refresh() {
     try {
-      const r = await fetch(`${BROWSER_API_URL}/api/connections`, { cache: "no-store" });
+      const r = await clientFetch("/api/connections", { cache: "no-store" });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const body = (await r.json()) as { items: ConnectionRow[] };
       setItems(body.items);
@@ -73,13 +78,16 @@ export function ConnectionsList() {
     }
   }
 
-  useEffect(() => { refresh(); }, []);
+  useEffect(() => {
+    fetchMe().then(setMe);
+    refresh();
+  }, []);
 
   async function disconnect(id: number, label: string) {
     if (!confirm(`Disconnect ${label}? Past data is kept but new syncs will stop.`)) return;
     setBusy(id);
     try {
-      const r = await fetch(`${BROWSER_API_URL}/api/connections/${id}`, { method: "DELETE" });
+      const r = await clientFetch(`/api/connections/${id}`, { method: "DELETE" });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       await refresh();
     } catch (e) {
@@ -124,6 +132,7 @@ export function ConnectionsList() {
             row={c}
             onDisconnect={() => disconnect(c.id, c.account_label || `${c.source} #${c.id}`)}
             busy={busy === c.id}
+            canManage={isAdmin}
           />
         </li>
       ))}
@@ -156,10 +165,12 @@ function ConnectionRowCard({
   row,
   onDisconnect,
   busy,
+  canManage,
 }: {
   row: ConnectionRow;
   onDisconnect: () => void;
   busy: boolean;
+  canManage: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [files, setFiles] = useState<FilesResponse | null>(null);
@@ -170,7 +181,7 @@ function ConnectionRowCard({
     if (files || filesLoading) return;
     setFilesLoading(true);
     try {
-      const r = await fetch(`${BROWSER_API_URL}/api/connections/${row.id}/files?limit=120`, { cache: "no-store" });
+      const r = await clientFetch(`/api/connections/${row.id}/files?limit=120`, { cache: "no-store" });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       setFiles((await r.json()) as FilesResponse);
       setFilesErr(null);
@@ -221,14 +232,16 @@ function ConnectionRowCard({
           >
             {open ? "Hide files" : "Show files"}
           </button>
-          <button
-            onClick={onDisconnect}
-            disabled={busy}
-            className="rounded-full border px-3 py-1 text-[12.5px] font-medium disabled:opacity-50"
-            style={{ borderColor: "var(--danger-line)", color: "var(--danger-ink)", background: "var(--danger-soft)" }}
-          >
-            {busy ? "…" : "Disconnect"}
-          </button>
+          {canManage ? (
+            <button
+              onClick={onDisconnect}
+              disabled={busy}
+              className="rounded-full border px-3 py-1 text-[12.5px] font-medium disabled:opacity-50"
+              style={{ borderColor: "var(--danger-line)", color: "var(--danger-ink)", background: "var(--danger-soft)" }}
+            >
+              {busy ? "…" : "Disconnect"}
+            </button>
+          ) : null}
         </div>
       </div>
 

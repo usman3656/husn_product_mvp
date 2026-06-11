@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
-const BROWSER_API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+import { clientFetch } from "@/lib/api";
 
 type SessionSummary = {
   id: number;
@@ -46,7 +46,7 @@ export function AskHusnShell() {
   useEffect(() => {
     (async () => {
       try {
-        const r = await fetch(`${BROWSER_API_URL}/api/chat/sessions`);
+        const r = await clientFetch("/api/chat/sessions");
         const body = (await r.json()) as { items: SessionSummary[] };
         setSessions(body.items);
         if (body.items.length > 0) setCurrentId(body.items[0].id);
@@ -64,7 +64,7 @@ export function AskHusnShell() {
     if (currentId == null) { setMessages([]); return; }
     (async () => {
       try {
-        const r = await fetch(`${BROWSER_API_URL}/api/chat/sessions/${currentId}/messages`);
+        const r = await clientFetch(`/api/chat/sessions/${currentId}/messages`);
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         const body = (await r.json()) as { items: Message[] };
         setMessages(body.items);
@@ -81,13 +81,13 @@ export function AskHusnShell() {
   }, [messages, sending]);
 
   async function refreshSessions() {
-    const r = await fetch(`${BROWSER_API_URL}/api/chat/sessions`);
+    const r = await clientFetch("/api/chat/sessions");
     const body = (await r.json()) as { items: SessionSummary[] };
     setSessions(body.items);
   }
 
   async function createSession(autoSelect: boolean) {
-    const r = await fetch(`${BROWSER_API_URL}/api/chat/sessions`, {
+    const r = await clientFetch("/api/chat/sessions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({}),
@@ -99,7 +99,7 @@ export function AskHusnShell() {
 
   async function deleteSession(id: number) {
     if (!confirm("Delete this conversation?")) return;
-    await fetch(`${BROWSER_API_URL}/api/chat/sessions/${id}`, { method: "DELETE" });
+    await clientFetch(`/api/chat/sessions/${id}`, { method: "DELETE" });
     if (currentId === id) setCurrentId(null);
     await refreshSessions();
   }
@@ -123,13 +123,13 @@ export function AskHusnShell() {
     setMessages((prev) => [...prev, optimistic]);
     setInput("");
     try {
-      const r = await fetch(`${BROWSER_API_URL}/api/chat/sessions/${currentId}/messages`, {
+      const r = await clientFetch(`/api/chat/sessions/${currentId}/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ content: text }),
       });
       if (!r.ok) throw new Error((await r.text()).slice(0, 200));
-      const list = await (await fetch(`${BROWSER_API_URL}/api/chat/sessions/${currentId}/messages`)).json();
+      const list = await (await clientFetch(`/api/chat/sessions/${currentId}/messages`)).json();
       setMessages(list.items);
       await refreshSessions();
     } catch (e) {

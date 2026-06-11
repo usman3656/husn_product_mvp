@@ -1,8 +1,7 @@
 import { CardHeader, EmptyState, Pill, Tile } from "@/components/ui";
-import { FETCH_INIT } from "@/lib/fetch-init";
+import { serverFetch } from "@/lib/api";
 import { DisconnectButton } from "@/components/disconnect-button";
 
-const SERVER_API_URL = process.env.API_URL ?? "http://api:8000";
 const BROWSER_API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 type SourceKey = "slack" | "jira" | "google" | "microsoft";
@@ -20,7 +19,7 @@ type ListResponse = { count: number; items: Artifact[] };
 
 async function fetchArtifacts(source: SourceKey): Promise<ListResponse> {
   try {
-    const res = await fetch(`${SERVER_API_URL}/api/artifacts?source=${source}&limit=25`, FETCH_INIT);
+    const res = await serverFetch(`/api/artifacts?source=${source}&limit=25`);
     if (!res.ok) return { count: 0, items: [] };
     return (await res.json()) as ListResponse;
   } catch {
@@ -34,7 +33,7 @@ type JiraStatus = {
 
 async function fetchJiraStatus(): Promise<JiraStatus> {
   try {
-    const res = await fetch(`${SERVER_API_URL}/auth/jira/status`, FETCH_INIT);
+    const res = await serverFetch("/auth/jira/status");
     if (!res.ok) return { connections: [] };
     return (await res.json()) as JiraStatus;
   } catch {
@@ -48,7 +47,7 @@ type SlackStatus = {
 
 async function fetchSlackStatus(): Promise<SlackStatus> {
   try {
-    const res = await fetch(`${SERVER_API_URL}/auth/slack/status`, FETCH_INIT);
+    const res = await serverFetch("/auth/slack/status");
     if (!res.ok) return { connections: [] };
     return (await res.json()) as SlackStatus;
   } catch {

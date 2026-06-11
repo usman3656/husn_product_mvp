@@ -2,7 +2,9 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 
+import { clientFetch, fetchMe, type Me } from "@/lib/api";
 import { ThemeToggle } from "@/components/theme-toggle";
 
 type NavItem = { href: string; label: string; icon: React.ReactNode; shortcut?: string };
@@ -64,10 +66,28 @@ const PLUMBING: NavItem[] = [
 
 export function SideNav() {
   const pathname = usePathname() || "/";
+  const [me, setMe] = useState<Me | null>(null);
 
-  // Hide the rail on legal / health pages — those want to feel like documents.
-  const STANDALONE = ["/privacy", "/terms", "/subprocessors", "/healthz"];
+  useEffect(() => {
+    fetchMe().then(setMe);
+  }, [pathname]);
+
+  // Hide the rail on legal / health / auth pages.
+  const STANDALONE = ["/privacy", "/terms", "/subprocessors", "/healthz", "/login", "/welcome"];
   if (STANDALONE.some((p) => pathname.startsWith(p))) return null;
+
+  // After the cutover, an unauthenticated visitor never sees the shell —
+  // middleware redirects on missing cookie; this covers the invalid-cookie
+  // edge from the client side.
+  if (me && me.auth_required && !me.authenticated && typeof window !== "undefined") {
+    window.location.href = "/login";
+    return null;
+  }
+
+  async function signOut() {
+    await clientFetch("/auth/logout", { method: "POST" });
+    window.location.href = "/login";
+  }
 
   return (
     <aside
@@ -150,11 +170,32 @@ export function SideNav() {
         </ul>
       </nav>
 
-      {/* Footer */}
+      {/* Footer — workspace identity + theme + sign out */}
       <div
         className="border-t px-4 py-3"
         style={{ borderColor: "var(--rule)" }}
       >
+        {me?.authenticated && me.workspace ? (
+          <div className="mb-2.5 flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <p className="truncate text-[12.5px] font-semibold" style={{ color: "var(--text)" }}>
+                {me.workspace.name}
+              </p>
+              <p className="truncate text-[10.5px]" style={{ color: "var(--muted)" }}>
+                {me.user?.email} · {me.workspace.role}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={signOut}
+              title="Sign out"
+              className="shrink-0 rounded-full border px-2 py-0.5 text-[10.5px] font-medium"
+              style={{ borderColor: "var(--border)", color: "var(--muted)", background: "var(--panel)" }}
+            >
+              Sign out
+            </button>
+          </div>
+        ) : null}
         <div className="flex items-center justify-between gap-3">
           <p className="text-[11.5px]" style={{ color: "var(--muted)" }}>
             The intelligence layer.

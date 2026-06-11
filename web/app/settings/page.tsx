@@ -1,5 +1,8 @@
 import Link from "next/link";
 
+import { AccountPanel } from "@/components/account-panel";
+import { MembersPanel } from "@/components/members-panel";
+
 export const metadata = { title: "Settings · Husn" };
 
 export default function SettingsPage() {
@@ -21,8 +24,11 @@ export default function SettingsPage() {
         </Group>
 
         <Group title="Account">
-          <Field label="Signed in as" value="lamaan-4@hotmail.com" />
-          <Field label="Workspace" value="Default" />
+          <AccountPanel />
+        </Group>
+
+        <Group title="Members">
+          <MembersPanel />
         </Group>
 
         <Group title="Integrations">

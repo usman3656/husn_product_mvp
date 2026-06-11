@@ -1,10 +1,9 @@
 import { CardHeader, EmptyState, Pill, Tile } from "@/components/ui";
-import { FETCH_INIT } from "@/lib/fetch-init";
+import { serverFetch } from "@/lib/api";
 import { DisconnectButton } from "@/components/disconnect-button";
 import { GoogleAllowlist } from "@/components/google-allowlist";
 import { GoogleFeed } from "@/components/google-feed";
 
-const SERVER_API_URL = process.env.API_URL ?? "http://api:8000";
 const BROWSER_API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 type GoogleConnection = {
@@ -21,7 +20,7 @@ type GoogleStatus = { connections: GoogleConnection[] };
 
 async function fetchStatus(): Promise<GoogleStatus> {
   try {
-    const res = await fetch(`${SERVER_API_URL}/auth/google/status`, FETCH_INIT);
+    const res = await serverFetch("/auth/google/status");
     if (!res.ok) return { connections: [] };
     return (await res.json()) as GoogleStatus;
   } catch {

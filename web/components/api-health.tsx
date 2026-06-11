@@ -1,21 +1,14 @@
 import { Dot, Tile } from "@/components/ui";
-import { FETCH_INIT } from "@/lib/fetch-init";
-// Server-side fetch (this is a server component): use API_URL which points to
-// the api service inside the docker network. Browser-facing copy still uses
-// NEXT_PUBLIC_API_URL so the visible string matches where the user can curl.
-const SERVER_API_URL = process.env.API_URL ?? "http://api:8000";
+import { serverJson } from "@/lib/api";
+// Server-side fetch (this is a server component): serverJson uses API_URL which
+// points to the api service inside the docker network. Browser-facing copy still
+// uses NEXT_PUBLIC_API_URL so the visible string matches where the user can curl.
 const BROWSER_API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 type Health = { status: string; version?: string };
 
 async function fetchHealth(): Promise<Health | null> {
-  try {
-    const res = await fetch(`${SERVER_API_URL}/health`, FETCH_INIT);
-    if (!res.ok) return null;
-    return (await res.json()) as Health;
-  } catch {
-    return null;
-  }
+  return serverJson<Health>("/health");
 }
 
 export async function ApiHealth() {

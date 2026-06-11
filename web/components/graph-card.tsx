@@ -1,6 +1,5 @@
 import { CardHeader, OfflineState, Pill, Tile } from "@/components/ui";
-import { FETCH_INIT } from "@/lib/fetch-init";
-const SERVER_API_URL = process.env.API_URL ?? "http://api:8000";
+import { serverJson } from "@/lib/api";
 
 type Counts = {
   persons: number;
@@ -29,23 +28,11 @@ type ProjectList = {
 };
 
 async function fetchSummary(): Promise<Summary | null> {
-  try {
-    const res = await fetch(`${SERVER_API_URL}/api/graph/summary`, FETCH_INIT);
-    if (!res.ok) return null;
-    return (await res.json()) as Summary;
-  } catch {
-    return null;
-  }
+  return serverJson<Summary>("/api/graph/summary");
 }
 
 async function fetchProjects(): Promise<ProjectList> {
-  try {
-    const res = await fetch(`${SERVER_API_URL}/api/graph/projects`, FETCH_INIT);
-    if (!res.ok) return { projects: [] };
-    return (await res.json()) as ProjectList;
-  } catch {
-    return { projects: [] };
-  }
+  return (await serverJson<ProjectList>("/api/graph/projects")) ?? { projects: [] };
 }
 
 function timeAgo(iso: string | null): string {

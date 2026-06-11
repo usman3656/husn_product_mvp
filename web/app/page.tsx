@@ -2,7 +2,7 @@ import Link from "next/link";
 
 import { Pulse as PulseStrip, type PulseDatum } from "@/components/pulse";
 import { ReachOutButton, type ReachOutContext } from "@/components/reach-out";
-import { FETCH_INIT } from "@/lib/fetch-init";
+import { serverJson } from "@/lib/api";
 
 /* ============================================================
    Briefing — the homepage IS the product.
@@ -15,8 +15,6 @@ import { FETCH_INIT } from "@/lib/fetch-init";
      6. Active Projects
    Built from the existing findings + graph + agent endpoints.
    ============================================================ */
-
-const SERVER_API_URL = process.env.API_URL ?? "http://api:8000";
 
 type PerSourceEvidence = {
   claim_id: number;
@@ -69,10 +67,6 @@ type Project = {
   artifact_count: number;
   scopes: { source: string; kind: string; id: string }[];
 };
-
-async function safeFetch<T>(url: string): Promise<T | null> {
-  try { const r = await fetch(url, FETCH_INIT); return r.ok ? ((await r.json()) as T) : null; } catch { return null; }
-}
 
 const SOURCE_LABEL: Record<string, string> = { jira: "Jira", slack: "Slack", google: "Google", microsoft: "Microsoft", email: "Email" };
 
@@ -232,10 +226,10 @@ function reachOutContext(f: Finding): ReachOutContext {
 
 export default async function Briefing() {
   const [findingsRes, statusRes, graphSummary, projectsRes] = await Promise.all([
-    safeFetch<{ items: Finding[] }>(`${SERVER_API_URL}/api/findings?status=open&limit=40`),
-    safeFetch<AgentStatus>(`${SERVER_API_URL}/api/agent/status`),
-    safeFetch<GraphSummary>(`${SERVER_API_URL}/api/graph/summary`),
-    safeFetch<{ projects: Project[] }>(`${SERVER_API_URL}/api/graph/projects`),
+    serverJson<{ items: Finding[] }>("/api/findings?status=open&limit=40"),
+    serverJson<AgentStatus>("/api/agent/status"),
+    serverJson<GraphSummary>("/api/graph/summary"),
+    serverJson<{ projects: Project[] }>("/api/graph/projects"),
   ]);
 
   const findings = (findingsRes?.items ?? []).sort(byConsequence);

@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 
 import { ReachOutButton, type ReachOutContext } from "@/components/reach-out";
 import { EvidenceChip } from "@/components/ui";
-import { FETCH_INIT } from "@/lib/fetch-init";
+import { serverJson } from "@/lib/api";
 
 /* ============================================================
    Investigation — the file on a single concern.
@@ -11,8 +11,6 @@ import { FETCH_INIT } from "@/lib/fetch-init";
    the top, the evidence as quotes, a timeline, related entities,
    and the actions you can take from here.
    ============================================================ */
-
-const SERVER_API_URL = process.env.API_URL ?? "http://api:8000";
 
 type Evidence = {
   role: string;
@@ -51,11 +49,7 @@ type Finding = {
 };
 
 async function fetchFinding(id: number): Promise<Finding | null> {
-  try {
-    const r = await fetch(`${SERVER_API_URL}/api/findings/${id}`, FETCH_INIT);
-    if (!r.ok) return null;
-    return (await r.json()) as Finding;
-  } catch { return null; }
+  return serverJson<Finding>(`/api/findings/${id}`);
 }
 
 const SOURCE_LABEL: Record<string, string> = {

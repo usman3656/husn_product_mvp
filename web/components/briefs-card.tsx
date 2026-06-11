@@ -1,9 +1,7 @@
 import { CardHeader, EmptyState, Tile } from "@/components/ui";
-import { FETCH_INIT } from "@/lib/fetch-init";
+import { serverFetch, serverJson } from "@/lib/api";
 import { BriefsTabs } from "@/components/briefs-tabs";
 import { RunButtonClient } from "@/components/briefs-run-button";
-
-const SERVER_API_URL = process.env.API_URL ?? "http://api:8000";
 
 type Bullet = { text: string; claim_ids: number[] };
 type ConflictRendered = { conflict_id: number; text: string; claim_ids: number[] };
@@ -37,18 +35,12 @@ type Status = {
 };
 
 async function fetchStatus(): Promise<Status | null> {
-  try {
-    const r = await fetch(`${SERVER_API_URL}/api/agent/status`, FETCH_INIT);
-    if (!r.ok) return null;
-    return (await r.json()) as Status;
-  } catch {
-    return null;
-  }
+  return serverJson<Status>("/api/agent/status");
 }
 
 async function fetchBriefs(): Promise<Brief[]> {
   try {
-    const r = await fetch(`${SERVER_API_URL}/api/agent/briefs?limit=50`, FETCH_INIT);
+    const r = await serverFetch("/api/agent/briefs?limit=50");
     if (!r.ok) return [];
     const body = (await r.json()) as { items: Brief[] };
     return body.items;

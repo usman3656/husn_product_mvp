@@ -1,6 +1,5 @@
 import { CardHeader, EvidenceChip, Pill, Tile } from "@/components/ui";
-import { FETCH_INIT } from "@/lib/fetch-init";
-const SERVER_API_URL = process.env.API_URL ?? "http://api:8000";
+import { serverFetch, serverJson } from "@/lib/api";
 
 type FindingsSummary = {
   open: number;
@@ -44,18 +43,12 @@ type Finding = {
 };
 
 async function fetchSummary(): Promise<FindingsSummary | null> {
-  try {
-    const res = await fetch(`${SERVER_API_URL}/api/findings/summary`, FETCH_INIT);
-    if (!res.ok) return null;
-    return (await res.json()) as FindingsSummary;
-  } catch {
-    return null;
-  }
+  return serverJson<FindingsSummary>("/api/findings/summary");
 }
 
 async function fetchFindings(): Promise<Finding[]> {
   try {
-    const res = await fetch(`${SERVER_API_URL}/api/findings?status=open&limit=20`, FETCH_INIT);
+    const res = await serverFetch("/api/findings?status=open&limit=20");
     if (!res.ok) return [];
     const body = (await res.json()) as { items: Finding[] };
     return body.items;

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-const BROWSER_API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+import { clientFetch } from "@/lib/api";
 
 type MailFolder = {
   id: string;
@@ -56,9 +56,9 @@ export function MicrosoftAllowlist() {
       try {
         setLoading(true);
         const [mr, rr, ar] = await Promise.all([
-          fetch(`${BROWSER_API_URL}/api/microsoft/mail-folders`),
-          fetch(`${BROWSER_API_URL}/api/microsoft/folders`),
-          fetch(`${BROWSER_API_URL}/api/microsoft/allowlist`),
+          clientFetch("/api/microsoft/mail-folders"),
+          clientFetch("/api/microsoft/folders"),
+          clientFetch("/api/microsoft/allowlist"),
         ]);
         const mb = (await mr.json()) as { items: MailFolder[] };
         const rb = (await rr.json()) as FolderListing;
@@ -85,7 +85,7 @@ export function MicrosoftAllowlist() {
         if (missing.length > 0) {
           const metas = await Promise.all(
             missing.map((id) =>
-              fetch(`${BROWSER_API_URL}/api/microsoft/folders/${id}/metadata`).then(
+              clientFetch(`/api/microsoft/folders/${id}/metadata`).then(
                 (r) => r.json() as Promise<{ id: string; name: string }>,
               ),
             ),
@@ -120,8 +120,8 @@ export function MicrosoftAllowlist() {
     });
     setNodeState(next);
     try {
-      const r = await fetch(
-        `${BROWSER_API_URL}/api/microsoft/folders?parent_id=${encodeURIComponent(folderId)}`,
+      const r = await clientFetch(
+        `/api/microsoft/folders?parent_id=${encodeURIComponent(folderId)}`,
       );
       const body = (await r.json()) as FolderListing;
       const after = new Map(nodeState);
@@ -161,7 +161,7 @@ export function MicrosoftAllowlist() {
     setStatus(null);
     setError(null);
     try {
-      const res = await fetch(`${BROWSER_API_URL}/api/microsoft/allowlist`, {
+      const res = await clientFetch("/api/microsoft/allowlist", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

@@ -1,5 +1,4 @@
-import { FETCH_INIT } from "@/lib/fetch-init";
-const SERVER_API_URL = process.env.API_URL ?? "http://api:8000";
+import { serverFetch } from "@/lib/api";
 
 type Artifact = {
   id: number;
@@ -12,10 +11,7 @@ type Artifact = {
 
 async function fetchKind(kind: string, limit = 10): Promise<Artifact[]> {
   try {
-    const r = await fetch(
-      `${SERVER_API_URL}/api/artifacts?source=microsoft&kind=${kind}&limit=${limit}`,
-      FETCH_INIT,
-    );
+    const r = await serverFetch(`/api/artifacts?source=microsoft&kind=${kind}&limit=${limit}`);
     if (!r.ok) return [];
     const body = (await r.json()) as { items: Artifact[] };
     return body.items;

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-const BROWSER_API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+import { clientFetch } from "@/lib/api";
 
 type Label = {
   id: string;
@@ -48,9 +48,9 @@ export function GoogleAllowlist() {
       try {
         setLoading(true);
         const [lr, rr, ar] = await Promise.all([
-          fetch(`${BROWSER_API_URL}/api/google/labels`),
-          fetch(`${BROWSER_API_URL}/api/google/folders?parent_id=root`),
-          fetch(`${BROWSER_API_URL}/api/google/allowlist`),
+          clientFetch("/api/google/labels"),
+          clientFetch("/api/google/folders?parent_id=root"),
+          clientFetch("/api/google/allowlist"),
         ]);
         const lb = (await lr.json()) as { items: Label[] };
         const rb = (await rr.json()) as FolderListing;
@@ -78,7 +78,7 @@ export function GoogleAllowlist() {
         if (missing.length > 0) {
           const metas = await Promise.all(
             missing.map((id) =>
-              fetch(`${BROWSER_API_URL}/api/google/folders/${id}/metadata`).then(
+              clientFetch(`/api/google/folders/${id}/metadata`).then(
                 (r) => r.json() as Promise<{ id: string; name: string }>,
               ),
             ),
@@ -115,8 +115,8 @@ export function GoogleAllowlist() {
     });
     setNodeState(next);
     try {
-      const r = await fetch(
-        `${BROWSER_API_URL}/api/google/folders?parent_id=${encodeURIComponent(folderId)}`,
+      const r = await clientFetch(
+        `/api/google/folders?parent_id=${encodeURIComponent(folderId)}`,
       );
       const body = (await r.json()) as FolderListing;
       const after = new Map(nodeState);
@@ -169,7 +169,7 @@ export function GoogleAllowlist() {
     setStatus(null);
     setError(null);
     try {
-      const res = await fetch(`${BROWSER_API_URL}/api/google/allowlist`, {
+      const res = await clientFetch("/api/google/allowlist", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

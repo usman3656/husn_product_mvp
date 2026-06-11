@@ -1,10 +1,9 @@
 import { CardHeader, EmptyState, Pill, Tile } from "@/components/ui";
-import { FETCH_INIT } from "@/lib/fetch-init";
+import { serverFetch } from "@/lib/api";
 import { DisconnectButton } from "@/components/disconnect-button";
 import { MicrosoftAllowlist } from "@/components/microsoft-allowlist";
 import { MicrosoftFeed } from "@/components/microsoft-feed";
 
-const SERVER_API_URL = process.env.API_URL ?? "http://api:8000";
 const BROWSER_API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 type MicrosoftConnection = {
@@ -21,7 +20,7 @@ type MicrosoftStatus = { connections: MicrosoftConnection[] };
 
 async function fetchStatus(): Promise<MicrosoftStatus> {
   try {
-    const res = await fetch(`${SERVER_API_URL}/auth/microsoft/status`, FETCH_INIT);
+    const res = await serverFetch("/auth/microsoft/status");
     if (!res.ok) return { connections: [] };
     return (await res.json()) as MicrosoftStatus;
   } catch {

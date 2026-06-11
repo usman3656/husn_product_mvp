@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-const BROWSER_API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+import { clientFetch } from "@/lib/api";
 
 export function DisconnectButton({
   connectionId,
@@ -25,7 +25,7 @@ export function DisconnectButton({
     setBusy(true);
     setError(null);
     try {
-      const r = await fetch(`${BROWSER_API_URL}/api/connections/${connectionId}`, {
+      const r = await clientFetch(`/api/connections/${connectionId}`, {
         method: "DELETE",
       });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
