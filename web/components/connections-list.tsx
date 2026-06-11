@@ -63,10 +63,16 @@ export function ConnectionsList() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<number | null>(null);
   const [me, setMe] = useState<Me | null>(null);
+  const [meLoaded, setMeLoaded] = useState(false);
 
   // Members get a read-only view: no disconnect, no reset (TENANCY.md D5).
+  // Until `/auth/me` resolves we assume admin so the connect cards render
+  // immediately for owners (and snap away if it turns out we're a member).
+  // After fetchMe resolves, the role decides definitively.
   const isAdmin =
-    !me?.auth_required || me?.workspace?.role === "owner" || me?.workspace?.role === "admin";
+    !meLoaded
+      ? true
+      : !me?.auth_required || me?.workspace?.role === "owner" || me?.workspace?.role === "admin";
 
   async function refresh() {
     try {
@@ -81,7 +87,10 @@ export function ConnectionsList() {
   }
 
   useEffect(() => {
-    fetchMe().then(setMe);
+    fetchMe().then((res) => {
+      setMe(res);
+      setMeLoaded(true);
+    });
     refresh();
   }, []);
 

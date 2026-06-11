@@ -242,10 +242,11 @@ export default async function Briefing() {
   const artifactCount = graphSummary?.counts?.artifacts ?? 0;
   const lastRun = statusRes?.last_run_at ?? null;
 
-  // "Awaiting first sync" — no connections AND no artifacts AND the agent has
-  // never run. Distinct from the legitimate "all clear" state of an
-  // established workspace with zero open findings.
-  const awaiting = connectionsCount === 0 && artifactCount === 0 && lastRun === null;
+  // "Awaiting first sync" — no connections AND no artifacts. The agent cron
+  // creates an agent_runs row every 30 min even with an empty skeleton, so
+  // last_run_at is unreliable as an "has data" signal. Connections + artifacts
+  // are the truth.
+  const awaiting = connectionsCount === 0 && artifactCount === 0;
 
   if (awaiting) {
     return <BriefingAwaiting />;
