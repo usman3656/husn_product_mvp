@@ -55,10 +55,12 @@ type AgentStatus = {
 };
 
 type GraphSummary = {
-  counts: { persons: number; projects: number; artifacts: number };
+  counts: { persons: number; projects: number; artifacts: number; person_identities: number; project_sources: number; artifact_mentions: number; raw_pending_normalization: number };
   last_raw_fetched_at: string | null;
   last_normalized_at: string | null;
 };
+
+type ConnectionRow = { id: number; source: string };
 
 type Project = {
   id: number;
@@ -225,16 +227,29 @@ function reachOutContext(f: Finding): ReachOutContext {
    ===================================================== */
 
 export default async function Briefing() {
-  const [findingsRes, statusRes, graphSummary, projectsRes] = await Promise.all([
+  const [findingsRes, statusRes, graphSummary, projectsRes, connectionsRes] = await Promise.all([
     serverJson<{ items: Finding[] }>("/api/findings?status=open&limit=40"),
     serverJson<AgentStatus>("/api/agent/status"),
     serverJson<GraphSummary>("/api/graph/summary"),
     serverJson<{ projects: Project[] }>("/api/graph/projects"),
+    serverJson<{ items: ConnectionRow[] }>("/api/connections"),
   ]);
 
   const findings = (findingsRes?.items ?? []).sort(byConsequence);
   const projects = projectsRes?.projects ?? [];
   const top = findings[0] ?? null;
+  const connectionsCount = connectionsRes?.items?.length ?? 0;
+  const artifactCount = graphSummary?.counts?.artifacts ?? 0;
+  const lastRun = statusRes?.last_run_at ?? null;
+
+  // "Awaiting first sync" — no connections AND no artifacts AND the agent has
+  // never run. Distinct from the legitimate "all clear" state of an
+  // established workspace with zero open findings.
+  const awaiting = connectionsCount === 0 && artifactCount === 0 && lastRun === null;
+
+  if (awaiting) {
+    return <BriefingAwaiting />;
+  }
 
   const conf = confidence(findings);
   const alig = alignment(findings);
@@ -247,7 +262,7 @@ export default async function Briefing() {
       {/* Editorial header */}
       <header className="husn-rise" style={{ maxWidth: 720 }}>
         <p className="husn-meta">
-          {todayHeadline()} · The brief, refreshed {timeAgo(statusRes?.last_run_at ?? null)}
+          {todayHeadline()} · The brief, refreshed {timeAgo(lastRun)}
         </p>
         <h1 className="husn-display mt-4">Today&apos;s briefing.</h1>
         <p className="husn-prose mt-5 max-w-[60ch]">
@@ -301,6 +316,119 @@ export default async function Briefing() {
         </p>
       </footer>
     </main>
+  );
+}
+
+/* =====================================================
+   "Awaiting first sync" — fresh workspace, no data yet.
+   Pulse is intentionally neutral / muted; no 100% rings,
+   no "all in sync" framing. Just one prominent CTA.
+   ===================================================== */
+
+function BriefingAwaiting() {
+  return (
+    <main className="mx-auto px-6 lg:px-12 pt-12 pb-32" style={{ maxWidth: 1100 }}>
+      <header className="husn-rise" style={{ maxWidth: 720 }}>
+        <p className="husn-meta">{todayHeadline()} · No briefing yet</p>
+        <h1 className="husn-display mt-4">Today&apos;s briefing.</h1>
+        <p className="husn-prose mt-5 max-w-[60ch]">
+          Connect a tool and Husn will start reading. Your first briefing
+          builds within about an hour of the first sync.
+        </p>
+      </header>
+
+      <section className="mt-14 husn-rise" style={{ animationDelay: "40ms" }}>
+        <SectionLabel kicker="01" title="Organizational Pulse" />
+        <AwaitingPulse />
+      </section>
+
+      <section className="mt-20 husn-rise" style={{ animationDelay: "100ms" }}>
+        <article
+          className="rounded-[var(--radius-xl)] border p-10 lg:p-14"
+          style={{ borderColor: "var(--border)", background: "var(--panel)", boxShadow: "var(--shadow-md)" }}
+        >
+          <p className="husn-eyebrow">Get started</p>
+          <h2 className="husn-title mt-4" style={{ fontSize: 36, lineHeight: 1.12, maxWidth: "20ch" }}>
+            Connect your tools.
+          </h2>
+          <p className="husn-prose mt-5 max-w-[62ch]">
+            As you connect Slack, Jira, Google, and Microsoft, Husn maps the
+            work your team is already doing, surfaces conflicts and ownership
+            gaps, and writes a per-persona briefing every morning. Every claim
+            stays sourced.
+          </p>
+          <div className="mt-8 flex flex-wrap gap-2.5">
+            <Link
+              href="/connections"
+              className="inline-flex items-center gap-1.5 rounded-full border px-4 py-2 text-[14px] font-semibold"
+              style={{ background: "var(--text)", color: "var(--bg)", borderColor: "var(--text)" }}
+            >
+              Connect tools →
+            </Link>
+            <Link
+              href="/settings"
+              className="inline-flex items-center gap-1.5 rounded-full border px-4 py-2 text-[13.5px] font-medium"
+              style={{ background: "var(--panel)", color: "var(--text)", borderColor: "var(--border-strong)" }}
+            >
+              Invite teammates
+            </Link>
+          </div>
+        </article>
+      </section>
+
+      <footer className="mt-24 pt-6 border-t" style={{ borderColor: "var(--rule)" }}>
+        <p className="husn-meta">
+          Once data is flowing, the briefing populates here.{" "}
+          <Link href="/ask" style={{ color: "var(--accent)" }} className="font-medium">
+            Ask Husn anything
+          </Link>{" "}
+          works the moment you have a connection.
+        </p>
+      </footer>
+    </main>
+  );
+}
+
+function AwaitingPulse() {
+  return (
+    <div
+      className="grid grid-cols-2 lg:grid-cols-4 gap-px overflow-hidden rounded-[var(--radius-lg)] border"
+      style={{ background: "var(--rule)", borderColor: "var(--border)" }}
+    >
+      {[
+        { label: "Confidence", caption: "Builds as Husn reads your sources." },
+        { label: "Alignment", caption: "Surfaces once two sources can be compared." },
+        { label: "Momentum", caption: "Tracks activity across connected tools." },
+        { label: "Emerging Risks", caption: "Nothing to flag until data is flowing." },
+      ].map((cell) => (
+        <div key={cell.label} className="p-6" style={{ background: "var(--panel)" }}>
+          <p className="husn-eyebrow" style={{ fontSize: 10.5 }}>{cell.label}</p>
+          <div className="mt-4 flex items-center gap-5">
+            <span
+              aria-hidden
+              className="inline-block rounded-full shrink-0"
+              style={{
+                width: 14,
+                height: 14,
+                background: "var(--panel-2)",
+                border: "1px solid var(--border-strong)",
+              }}
+            />
+            <div>
+              <p
+                className="tabular"
+                style={{ fontSize: 24, fontWeight: 600, letterSpacing: "-0.018em", lineHeight: 1, color: "var(--muted-2)" }}
+              >
+                —
+              </p>
+              <p className="mt-2 text-[12.5px] leading-snug" style={{ color: "var(--muted)", maxWidth: "22ch" }}>
+                {cell.caption}
+              </p>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }
 

@@ -110,33 +110,134 @@ export function ConnectionsList() {
   if (items === null) {
     return <p className="text-[14px]" style={{ color: "var(--muted)" }}>Loading connections…</p>;
   }
-  if (items.length === 0) {
-    return (
-      <div
-        className="rounded-[var(--radius)] border border-dashed px-6 py-10"
-        style={{ borderColor: "var(--border-strong)", background: "var(--panel-2)" }}
-      >
-        <p className="text-[14.5px] font-medium">No connections yet.</p>
-        <p className="mt-2 text-[13px]" style={{ color: "var(--muted)" }}>
-          Connect a tool from the dashboard so Husn has somewhere to read from.
-        </p>
-      </div>
-    );
-  }
+
+  const connectedSources = new Set(items.map((c) => c.source));
+  const unconnected = ALL_PROVIDERS.filter((p) => !connectedSources.has(p.source));
 
   return (
-    <ul className="space-y-3">
-      {items.map((c) => (
-        <li key={c.id}>
-          <ConnectionRowCard
-            row={c}
-            onDisconnect={() => disconnect(c.id, c.account_label || `${c.source} #${c.id}`)}
-            busy={busy === c.id}
-            canManage={isAdmin}
-          />
-        </li>
-      ))}
-    </ul>
+    <div className="space-y-8">
+      {/* Connect a new tool — admin only */}
+      {isAdmin && unconnected.length > 0 ? (
+        <section>
+          <p className="husn-eyebrow">{items.length === 0 ? "Get started" : "Connect another tool"}</p>
+          <h2 className="husn-heading mt-3" style={{ fontSize: 19 }}>
+            {items.length === 0 ? "Connect your first source" : "Add a source"}
+          </h2>
+          <p className="mt-3 text-[14px] leading-relaxed max-w-[60ch]" style={{ color: "var(--muted)" }}>
+            Husn reads what your team already writes — Slack threads, Jira issues,
+            Google docs, Microsoft files — and turns it into a daily briefing.
+            Connect a source below to get started; you can add the rest any time.
+          </p>
+          <ul className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {unconnected.map((p) => (
+              <li key={p.source}>
+                <ConnectCard provider={p} />
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
+      {/* Connected tools list */}
+      {items.length > 0 ? (
+        <section>
+          {isAdmin && unconnected.length > 0 ? (
+            <p className="husn-eyebrow mb-3">Connected</p>
+          ) : null}
+          <ul className="space-y-3">
+            {items.map((c) => (
+              <li key={c.id}>
+                <ConnectionRowCard
+                  row={c}
+                  onDisconnect={() => disconnect(c.id, c.account_label || `${c.source} #${c.id}`)}
+                  busy={busy === c.id}
+                  canManage={isAdmin}
+                />
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : !isAdmin ? (
+        <div
+          className="rounded-[var(--radius)] border border-dashed px-6 py-10"
+          style={{ borderColor: "var(--border-strong)", background: "var(--panel-2)" }}
+        >
+          <p className="text-[14.5px] font-medium">No connections yet.</p>
+          <p className="mt-2 text-[13px]" style={{ color: "var(--muted)" }}>
+            Your workspace admin connects the tools Husn reads from.
+          </p>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+// ---- Provider catalog -------------------------------------------------------
+
+type Provider = {
+  source: string;
+  label: string;
+  blurb: string;
+  authPath: string;
+};
+
+const ALL_PROVIDERS: Provider[] = [
+  {
+    source: "slack",
+    label: "Slack",
+    blurb: "The conversations where decisions actually happen.",
+    authPath: "/auth/slack/start",
+  },
+  {
+    source: "jira",
+    label: "Jira",
+    blurb: "Issues, dates, status, ownership.",
+    authPath: "/auth/jira/start",
+  },
+  {
+    source: "google",
+    label: "Google",
+    blurb: "Gmail · Drive · Docs · Sheets.",
+    authPath: "/auth/google/start",
+  },
+  {
+    source: "microsoft",
+    label: "Microsoft",
+    blurb: "Outlook · OneDrive · Office files.",
+    authPath: "/auth/microsoft/start",
+  },
+];
+
+function ConnectCard({ provider }: { provider: Provider }) {
+  // Normal browser navigation: the API redirects (302) to the provider's
+  // OAuth consent screen, and consent → /auth/<provider>/callback comes
+  // back to api.husn.io. XHR / fetch cannot follow OAuth redirects.
+  const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "https://api.husn.io";
+  const href = `${apiBase}${provider.authPath}`;
+  return (
+    <a
+      href={href}
+      className="block rounded-[var(--radius)] border px-5 py-5 husn-lift"
+      style={{ borderColor: "var(--border)", background: "var(--panel)" }}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-[15px] font-semibold" style={{ color: "var(--text)" }}>
+            {provider.label}
+          </p>
+          <p className="mt-1 text-[13px] leading-relaxed" style={{ color: "var(--muted)" }}>
+            {provider.blurb}
+          </p>
+        </div>
+        <span
+          aria-hidden
+          className="shrink-0 inline-flex items-center gap-1 rounded-full border px-3 py-1 text-[12.5px] font-medium"
+          style={{ background: "var(--text)", color: "var(--bg)", borderColor: "var(--text)" }}
+        >
+          Connect →
+        </span>
+      </div>
+    </a>
   );
 }
 

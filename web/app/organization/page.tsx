@@ -60,6 +60,51 @@ export default async function OrganizationPage() {
   const findings = findingsRes?.items ?? [];
   const connections = connectionsRes?.items ?? [];
 
+  // Awaiting first sync: don't pretend the org is "well-mapped" when nothing
+  // has been read yet. One CTA, then the sections render their own empty
+  // states under it (the existing Empty components are already calm).
+  const awaiting = projects.length === 0 && persons.length === 0 && connections.length === 0;
+  if (awaiting) {
+    return (
+      <main className="mx-auto px-6 lg:px-12 pt-12 pb-32" style={{ maxWidth: 1100 }}>
+        <header className="husn-rise" style={{ maxWidth: 760 }}>
+          <p className="husn-eyebrow">Organization</p>
+          <h1 className="husn-display mt-4">Your organization, unmapped.</h1>
+          <p className="husn-prose mt-5 max-w-[60ch]">
+            Husn maps the work your team is doing and the people moving it from
+            the tools you connect. Once a source is wired, this page fills in:
+            workstreams, the people × workstreams matrix, decisions in motion.
+          </p>
+        </header>
+        <section className="mt-14 husn-rise" style={{ animationDelay: "60ms" }}>
+          <article
+            className="rounded-[var(--radius-xl)] border p-10 lg:p-14"
+            style={{ borderColor: "var(--border)", background: "var(--panel)", boxShadow: "var(--shadow-md)" }}
+          >
+            <p className="husn-eyebrow">Get started</p>
+            <h2 className="husn-title mt-4" style={{ fontSize: 32, lineHeight: 1.14, maxWidth: "22ch" }}>
+              Connect a tool to begin.
+            </h2>
+            <p className="husn-prose mt-5 max-w-[60ch]">
+              Slack, Jira, Google, or Microsoft — pick the source where your
+              team&apos;s work actually lives. Within an hour of the first sync,
+              this page maps people, workstreams, and the relationships between them.
+            </p>
+            <div className="mt-8">
+              <Link
+                href="/connections"
+                className="inline-flex items-center gap-1.5 rounded-full border px-4 py-2 text-[14px] font-semibold"
+                style={{ background: "var(--text)", color: "var(--bg)", borderColor: "var(--text)" }}
+              >
+                Connect tools →
+              </Link>
+            </div>
+          </article>
+        </section>
+      </main>
+    );
+  }
+
   return (
     <main className="mx-auto px-6 lg:px-12 pt-12 pb-32" style={{ maxWidth: 1100 }}>
       {/* Editorial header */}
