@@ -26,10 +26,19 @@ export default function LoginPage() {
         method: "POST",
         body: JSON.stringify({ email: v }),
       });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const bodyText = await r.text().catch(() => "");
+      if (!r.ok) {
+        throw new Error(`HTTP ${r.status} — ${bodyText.slice(0, 200) || "(no body)"}`);
+      }
+      // Show success even if body was empty — the API returned 2xx.
       setSent(true);
-    } catch {
-      setError("Could not send the link. Try again in a moment.");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      // Surface the actual error so we can see CORS / network / CSRF rejections.
+      setError(`Couldn't send the link: ${msg}`);
+      // Also dump to console so the network row is easy to find in DevTools.
+      // eslint-disable-next-line no-console
+      console.error("[husn login] send failed", err);
     } finally {
       setBusy(false);
     }
