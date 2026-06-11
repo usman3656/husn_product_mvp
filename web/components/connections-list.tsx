@@ -1,5 +1,7 @@
 "use client";
 
+// Force prod rebuild — connect cards (Slack/Jira/Google/Microsoft) must
+// render for admins on a fresh workspace. v2 2026-06-11.
 import { useEffect, useState } from "react";
 
 import { clientFetch, fetchMe, type Me } from "@/lib/api";
