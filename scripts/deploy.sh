@@ -9,13 +9,15 @@
 #   - This script is idempotent; re-running is safe.
 #
 # Usage:
-#   scripts/deploy.sh             # full pull + build + up. If web/ or api/
-#                                 # changed since the last deploy, the
-#                                 # corresponding service is rebuilt with
-#                                 # --no-cache to defeat BuildKit's
-#                                 # occasionally-poisoned COPY cache.
-#   scripts/deploy.sh --no-build  # skip image rebuild (faster)
-#   scripts/deploy.sh --no-cache  # force --no-cache on every service
+#   scripts/deploy.sh             # FULL clean rebuild of every service with
+#                                 # --no-cache, then recreate containers.
+#                                 # This is the default because BuildKit's
+#                                 # COPY cache has burned us repeatedly; the
+#                                 # extra ~90s per service is cheap insurance.
+#   scripts/deploy.sh --fast      # use BuildKit cache; only rebuilds what
+#                                 # actually changed. Use when iterating fast
+#                                 # and you trust the cache.
+#   scripts/deploy.sh --no-build  # skip image rebuild entirely (just pull+up)
 #   scripts/deploy.sh --logs      # tail after up
 set -euo pipefail
 
@@ -25,11 +27,11 @@ cd "$REPO_ROOT"
 COMPOSE="docker compose -f docker-compose.prod.yml --env-file .env.prod"
 BUILD_FLAG="--build"
 TAIL_LOGS=0
-FORCE_NO_CACHE=0
+FAST=0
 for arg in "$@"; do
   case "$arg" in
     --no-build) BUILD_FLAG="" ;;
-    --no-cache) FORCE_NO_CACHE=1 ;;
+    --fast) FAST=1 ;;
     --logs) TAIL_LOGS=1 ;;
     *) echo "unknown arg: $arg" >&2; exit 2 ;;
   esac
@@ -41,47 +43,24 @@ if [[ ! -f .env.prod ]]; then
   exit 1
 fi
 
-# Remember the pre-pull HEAD so we can detect which service trees actually
-# changed. First run (no marker file) treats everything as changed and
-# forces no-cache.
-LAST_DEPLOY_FILE=".last-deployed-sha"
-PREV_SHA=""
-[[ -f "$LAST_DEPLOY_FILE" ]] && PREV_SHA=$(cat "$LAST_DEPLOY_FILE")
-
 echo "==> Pulling latest from origin/main"
 git fetch --quiet origin main
 git reset --hard origin/main
 NEW_SHA=$(git rev-parse HEAD)
+echo "    at $NEW_SHA"
 
-# Detect which services changed (web/, api/) so we can target --no-cache.
-# Docker BuildKit's COPY cache occasionally goes stale and skips real
-# changes; targeted --no-cache catches that without rebuilding everything.
-SVC_NO_CACHE=()
-if [[ "$BUILD_FLAG" == "--build" ]]; then
-  if [[ $FORCE_NO_CACHE -eq 1 ]]; then
-    SVC_NO_CACHE=(web api worker)
-  elif [[ -z "$PREV_SHA" ]]; then
-    SVC_NO_CACHE=(web api worker)
-  else
-    if ! git diff --quiet "$PREV_SHA" "$NEW_SHA" -- web/; then
-      SVC_NO_CACHE+=(web)
-    fi
-    if ! git diff --quiet "$PREV_SHA" "$NEW_SHA" -- api/; then
-      SVC_NO_CACHE+=(api worker)
-    fi
-  fi
+# DEFAULT: nuke the cache for every service so we can never silently ship
+# a stale image again. Use --fast to opt back into cached builds.
+if [[ "$BUILD_FLAG" == "--build" && $FAST -eq 0 ]]; then
+  echo "==> Full --no-cache rebuild: web, api, worker"
+  $COMPOSE build --no-cache web api worker
 fi
 
-if [[ ${#SVC_NO_CACHE[@]} -gt 0 ]]; then
-  echo "==> Rebuilding without cache: ${SVC_NO_CACHE[*]}"
-  $COMPOSE build --no-cache "${SVC_NO_CACHE[@]}"
-fi
-
-echo "==> docker compose up $BUILD_FLAG"
+echo "==> docker compose up $BUILD_FLAG --force-recreate"
+# --force-recreate guarantees the running container matches the freshly
+# built image even when compose thinks "nothing changed".
 # shellcheck disable=SC2086
-$COMPOSE up -d $BUILD_FLAG
-
-echo "$NEW_SHA" > "$LAST_DEPLOY_FILE"
+$COMPOSE up -d $BUILD_FLAG --force-recreate
 
 echo "==> Waiting for api to report healthy"
 for i in {1..60}; do
