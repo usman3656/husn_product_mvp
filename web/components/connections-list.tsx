@@ -5,6 +5,8 @@
 import { useEffect, useState } from "react";
 
 import { clientFetch, fetchMe, type Me } from "@/lib/api";
+import { GoogleAllowlist } from "@/components/google-allowlist";
+import { MicrosoftAllowlist } from "@/components/microsoft-allowlist";
 
 type ConnectionRow = {
   id: number;
@@ -285,9 +287,11 @@ function ConnectionRowCard({
   canManage: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [files, setFiles] = useState<FilesResponse | null>(null);
   const [filesErr, setFilesErr] = useState<string | null>(null);
   const [filesLoading, setFilesLoading] = useState(false);
+  const hasPicker = row.source === "google" || row.source === "microsoft";
 
   async function ensureFiles() {
     if (files || filesLoading) return;
@@ -335,6 +339,17 @@ function ConnectionRowCard({
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
+          {hasPicker && canManage ? (
+            <button
+              type="button"
+              onClick={() => setPickerOpen((o) => !o)}
+              className="rounded-full border px-3 py-1 text-[12.5px] font-medium"
+              style={{ borderColor: "var(--accent)", background: "var(--accent-soft)", color: "var(--accent-ink)" }}
+              aria-expanded={pickerOpen}
+            >
+              {pickerOpen ? "Hide picker" : "Choose what to sync"}
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={toggle}
@@ -365,10 +380,25 @@ function ConnectionRowCard({
         </p>
       ) : null}
 
+      {/* Picker panel — pick Gmail labels / Outlook folders / Drive trees.
+          Without this, the backfill runs every 5 min but reads zero things
+          because the allowlist is empty. */}
+      {hasPicker && pickerOpen ? (
+        <div className="border-t px-5 pb-5" style={{ borderColor: "var(--rule)" }}>
+          <p className="husn-eyebrow mt-4">Choose what Husn reads</p>
+          <p className="mt-1 text-[12.5px]" style={{ color: "var(--muted)" }}>
+            Pick the labels and folders Husn should sync. Nothing outside this
+            selection is ever fetched. Save below to queue an immediate backfill.
+          </p>
+          {row.source === "google" ? <GoogleAllowlist /> : null}
+          {row.source === "microsoft" ? <MicrosoftAllowlist /> : null}
+        </div>
+      ) : null}
+
       {/* Files panel */}
       {open ? (
         <div className="border-t" style={{ borderColor: "var(--rule)" }}>
-          <FilesPanel files={files} loading={filesLoading} err={filesErr} />
+          <FilesPanel files={files} loading={filesLoading} err={filesErr} hasPicker={hasPicker} />
         </div>
       ) : null}
     </article>
@@ -379,10 +409,12 @@ function FilesPanel({
   files,
   loading,
   err,
+  hasPicker,
 }: {
   files: FilesResponse | null;
   loading: boolean;
   err: string | null;
+  hasPicker: boolean;
 }) {
   if (err) {
     return <p className="p-5 text-[13px]" style={{ color: "var(--warning-ink)" }}>Could not load files: {err}</p>;
@@ -393,7 +425,9 @@ function FilesPanel({
   if (files.items.length === 0) {
     return (
       <p className="p-5 text-[13px]" style={{ color: "var(--muted)" }}>
-        Nothing has been read from this source yet. The next backfill tick will pick things up.
+        {hasPicker
+          ? "Nothing has been read yet. Open “Choose what to sync” above to pick which labels and folders Husn should read — without a selection, the backfill has nothing to fetch."
+          : "Nothing has been read from this source yet. The next backfill tick will pick things up."}
       </p>
     );
   }
