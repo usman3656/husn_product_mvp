@@ -109,14 +109,48 @@ async def evaluate_drift(ctx: dict) -> dict:
 
 
 async def run_agent(ctx: dict) -> dict:
-    """Step 6 agent — runs LLM analysis over each project. Cron every 5 min.
+    """Step 6 agent — runs LLM analysis over each project. Cron every 30 min.
 
     NOT run_at_startup: a single run can take ~30s on Ollama with a real
     dossier, and we don't want it blocking the worker's normal boot. The
-    first cron tick within ~5 min will pick it up.
+    first cron tick (at :00 or :30) will pick it up.
     """
     async with SessionLocal() as session:
         return await run_renderer_for_all_projects(session, trigger="cron")
+
+
+# Manual "Sync now" pipeline — ingest sources, then derive, then render, in
+# order. Single source of truth for the ordering; the API just enqueues
+# `sync_pipeline`.
+_SYNC_PIPELINE: tuple = (
+    ("jira_backfill", jira_backfill),
+    ("slack_backfill", slack_backfill),
+    ("google_backfill", google_backfill),
+    ("microsoft_backfill", microsoft_backfill),
+    ("normalize_graph", normalize_graph),
+    ("extract_claims", extract_claims),
+    ("evaluate_drift", evaluate_drift),
+    ("run_agent", run_agent),
+)
+
+
+async def sync_pipeline(ctx: dict) -> dict:
+    """One-click 'Sync now' — run the whole ingest → derive → render pipeline
+    sequentially in a single job so the render step sees freshly-backfilled
+    data instead of racing it (the cron crons stagger these across the minute;
+    a manual refresh can't rely on that timing). Every step is idempotent, and
+    a failing source is logged and skipped so one bad connector doesn't abort
+    the briefing refresh.
+    """
+    out: dict = {}
+    for name, fn in _SYNC_PIPELINE:
+        try:
+            out[name] = await fn(ctx)
+        except Exception as e:  # noqa: BLE001 — one bad step shouldn't abort the rest
+            log.exception("husn.worker.sync_pipeline.step_failed", step=name)
+            out[name] = {"error": f"{type(e).__name__}: {e}"}
+    log.info("husn.worker.sync_pipeline.done")
+    return out
 
 
 # Cron schedules — drift-tolerant offsets so the jobs don't pile up.
@@ -144,6 +178,7 @@ class WorkerSettings:
         extract_claims,
         evaluate_drift,
         run_agent,
+        sync_pipeline,
     ]
     cron_jobs = [
         cron(jira_backfill, second=_BACKFILL_JIRA_SECONDS, run_at_startup=True),
@@ -153,7 +188,8 @@ class WorkerSettings:
         cron(normalize_graph, second=_NORMALIZE_SECONDS, run_at_startup=True),
         cron(extract_claims, second=_EXTRACT_SECONDS, run_at_startup=True),
         cron(evaluate_drift, second=_DRIFT_SECONDS, run_at_startup=True),
-        # Agent on a 5-min cadence; second=0 so the cost is borne at the top of each window.
+        # Agent every 30 min (_AGENT_MINUTES); second=0 so the cost is borne at
+        # the top of each window. Manual "Sync now" → sync_pipeline for on-demand.
         cron(run_agent, minute=_AGENT_MINUTES, second={0}),
     ]
     on_startup = startup

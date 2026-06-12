@@ -19,7 +19,7 @@ from typing import Any
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from husn.agent.llm import LLMResult, get_llm_client
+from husn.agent.llm import LLMResult, _post_with_429_retry, get_llm_client
 from husn.db.models import (
     Artifact,
     Claim,
@@ -336,8 +336,10 @@ async def _call_with_history(
         messages.append({"role": "user", "content": user_message})
 
         async with httpx.AsyncClient(timeout=s.llm_request_timeout_s) as h:
-            r = await h.post(
-                "https://api.groq.com/openai/v1/chat/completions",
+            r = await _post_with_429_retry(
+                h,
+                provider="groq",
+                url="https://api.groq.com/openai/v1/chat/completions",
                 json={
                     "model": s.groq_model,
                     "messages": messages,
@@ -345,7 +347,6 @@ async def _call_with_history(
                 },
                 headers={"Authorization": f"Bearer {s.groq_api_key}"},
             )
-            r.raise_for_status()
             data = r.json()
         choice = (data.get("choices") or [{}])[0]
         text = (choice.get("message") or {}).get("content") or ""
@@ -368,8 +369,10 @@ async def _call_with_history(
         messages.append({"role": "user", "content": user_message})
 
         async with httpx.AsyncClient(timeout=s.llm_request_timeout_s) as h:
-            r = await h.post(
-                f"{s.ollama_base_url.rstrip('/')}/api/chat",
+            r = await _post_with_429_retry(
+                h,
+                provider="ollama",
+                url=f"{s.ollama_base_url.rstrip('/')}/api/chat",
                 json={
                     "model": s.ollama_model,
                     "messages": messages,
@@ -377,7 +380,6 @@ async def _call_with_history(
                     "options": {"temperature": 0.2, "num_ctx": 8192},
                 },
             )
-            r.raise_for_status()
             data = r.json()
         text = (data.get("message") or {}).get("content") or ""
         return LLMResult(
@@ -397,8 +399,10 @@ async def _call_with_history(
         messages = list(history) + [{"role": "user", "content": user_message}]
 
         async with httpx.AsyncClient(timeout=s.llm_request_timeout_s) as h:
-            r = await h.post(
-                "https://api.anthropic.com/v1/messages",
+            r = await _post_with_429_retry(
+                h,
+                provider="anthropic",
+                url="https://api.anthropic.com/v1/messages",
                 json={
                     "model": s.anthropic_model,
                     "system": system,
@@ -412,7 +416,6 @@ async def _call_with_history(
                     "content-type": "application/json",
                 },
             )
-            r.raise_for_status()
             data = r.json()
         parts = data.get("content") or []
         text = "".join(p.get("text", "") for p in parts if p.get("type") == "text")

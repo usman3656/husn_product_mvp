@@ -3,7 +3,7 @@ import Link from "next/link";
 import { Pulse as PulseStrip, type PulseDatum } from "@/components/pulse";
 import { ReachOutButton, type ReachOutContext } from "@/components/reach-out";
 import { SyncNowButton } from "@/components/sync-now-button";
-import { serverJson } from "@/lib/api";
+import { serverJson, type Me } from "@/lib/api";
 
 /* ============================================================
    Briefing — the homepage IS the product.
@@ -228,13 +228,17 @@ function reachOutContext(f: Finding): ReachOutContext {
    ===================================================== */
 
 export default async function Briefing() {
-  const [findingsRes, statusRes, graphSummary, projectsRes, connectionsRes] = await Promise.all([
+  const [findingsRes, statusRes, graphSummary, projectsRes, connectionsRes, me] = await Promise.all([
     serverJson<{ items: Finding[] }>("/api/findings?status=open&limit=40"),
     serverJson<AgentStatus>("/api/agent/status"),
     serverJson<GraphSummary>("/api/graph/summary"),
     serverJson<{ projects: Project[] }>("/api/graph/projects"),
     serverJson<{ items: ConnectionRow[] }>("/api/connections"),
+    serverJson<Me>("/auth/me"),
   ]);
+
+  const role = me?.workspace?.role;
+  const isAdmin = role === "owner" || role === "admin";
 
   const findings = (findingsRes?.items ?? []).sort(byConsequence);
   const projects = projectsRes?.projects ?? [];
@@ -250,7 +254,7 @@ export default async function Briefing() {
   const awaiting = connectionsCount === 0 && artifactCount === 0;
 
   if (awaiting) {
-    return <BriefingAwaiting />;
+    return <BriefingAwaiting isAdmin={isAdmin} />;
   }
 
   const conf = confidence(findings);
@@ -270,7 +274,7 @@ export default async function Briefing() {
         <p className="husn-prose mt-5 max-w-[60ch]">
           {leadIn(findings.length, conf)}
         </p>
-        <SyncNowButton />
+        <SyncNowButton isAdmin={isAdmin} />
       </header>
 
       {/* 1. Organizational Pulse */}
@@ -328,7 +332,7 @@ export default async function Briefing() {
    no "all in sync" framing. Just one prominent CTA.
    ===================================================== */
 
-function BriefingAwaiting() {
+function BriefingAwaiting({ isAdmin = false }: { isAdmin?: boolean }) {
   return (
     <main className="mx-auto px-6 lg:px-12 pt-12 pb-32" style={{ maxWidth: 1100 }}>
       <header className="husn-rise" style={{ maxWidth: 720 }}>
@@ -338,7 +342,7 @@ function BriefingAwaiting() {
           Connect a tool and Husn will start reading. Your first briefing
           builds within about an hour of the first sync.
         </p>
-        <SyncNowButton />
+        <SyncNowButton isAdmin={isAdmin} />
       </header>
 
       <section className="mt-14 husn-rise" style={{ animationDelay: "40ms" }}>

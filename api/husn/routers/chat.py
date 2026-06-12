@@ -9,6 +9,7 @@ from sqlalchemy import asc, desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from husn.agent.chat import CHAT_HISTORY_TURNS, run_chat_turn
+from husn.agent.llm import RateLimitedError
 from husn.auth.deps import AuthContext, require_member
 from husn.db.models import ChatMessage, ChatSession, Project
 from husn.db.session import get_session
@@ -206,6 +207,13 @@ async def send_message(
             history=history,
             user_message=body.content.strip(),
         )
+    except RateLimitedError as e:
+        # Provider quota exhausted — tell the user to retry rather than dumping
+        # a raw 502. 429 lets the client distinguish "try again" from a crash.
+        msg = "_The model is rate-limited right now — please try again in a moment._"
+        session.add(ChatMessage(session_id=session_id, role="assistant", content=msg))
+        await session.commit()
+        raise HTTPException(429, f"{e.provider} rate-limited — try again shortly") from e
     except Exception as e:
         # Surface the failure as an assistant turn so the chat UX shows it
         assistant_msg = ChatMessage(

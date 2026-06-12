@@ -184,7 +184,7 @@ async def run_renderer_for_project(
         await _close_run(
             session,
             run_id=run_id,
-            status="ok",
+            status="rate_limited",
             error=f"rate-limited by {e.provider} — skipped",
             started=started,
             brief_count=0,
@@ -215,9 +215,20 @@ async def run_renderer_for_all_projects(
     out: dict[int, Any] = {}
     projects = (await session.execute(select(Project))).scalars().all()
     for p in projects:
-        out[p.id] = await run_renderer_for_project(
+        res = await run_renderer_for_project(
             session, project_id=p.id, trigger=trigger
         )
+        out[p.id] = res
+        if res.get("status") == "rate_limited":
+            # The provider quota is global — every remaining project would just
+            # 429 too. Stop now instead of hammering an exhausted quota; the
+            # next tick retries once the window rolls over.
+            log.warning(
+                "husn.agent.v2.rate_limited.halt_loop",
+                rendered=len(out),
+                remaining=len(projects) - len(out),
+            )
+            break
     return out
 
 

@@ -18,6 +18,8 @@ from __future__ import annotations
 import asyncio
 import json
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Any, Protocol
 
 import httpx
@@ -35,6 +37,76 @@ class RateLimitedError(Exception):
         super().__init__(f"{provider} 429 (retry_after={retry_after_s})")
         self.provider = provider
         self.retry_after_s = retry_after_s
+
+
+def _parse_retry_after(value: str | None) -> float | None:
+    """Parse a `Retry-After` header into seconds.
+
+    Supports both forms RFC 9110 permits: a number of seconds, or an HTTP-date
+    (e.g. ``Wed, 21 Oct 2026 07:28:00 GMT``). Returns ``None`` when the header
+    is absent or unparseable so the caller can fall back to a default backoff
+    instead of giving up on the retry entirely.
+    """
+    if not value:
+        return None
+    try:
+        return float(value)
+    except ValueError:
+        pass
+    try:
+        dt = parsedate_to_datetime(value)
+    except (TypeError, ValueError):
+        return None
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return max(0.0, (dt - datetime.now(timezone.utc)).total_seconds())
+
+
+async def _post_with_429_retry(
+    client: httpx.AsyncClient,
+    *,
+    provider: str,
+    url: str,
+    json: dict[str, Any],
+    headers: dict[str, str] | None = None,
+    max_attempts: int = 3,
+    default_backoff_s: float = 2.0,
+    max_backoff_s: float = 8.0,
+) -> httpx.Response:
+    """POST with short retries on HTTP 429, shared across every provider.
+
+    On a 429 we read ``Retry-After`` (numeric or HTTP-date; a missing/garbled
+    header falls back to ``default_backoff_s`` rather than bailing — that case
+    is exactly per-minute throttling a short retry clears). If the wait is
+    within ``max_backoff_s`` and attempts remain we sleep and retry; otherwise
+    (a long daily-cap wait, or attempts exhausted) we raise ``RateLimitedError``
+    so the orchestrator can skip cleanly. Non-429 errors raise via
+    ``raise_for_status`` as before.
+    """
+    retry_after_s: float | None = None
+    for attempt in range(max_attempts):
+        r = await client.post(url, json=json, headers=headers)
+        if r.status_code != 429:
+            r.raise_for_status()
+            return r
+        retry_after_s = _parse_retry_after(r.headers.get("retry-after"))
+        wait = retry_after_s if retry_after_s is not None else default_backoff_s
+        if wait > max_backoff_s:
+            # Long wait (daily token cap) — don't park the run; skip cleanly.
+            raise RateLimitedError(provider, retry_after_s)
+        if attempt < max_attempts - 1:
+            log.warning(
+                "husn.llm.429_backoff",
+                provider=provider,
+                attempt=attempt + 1,
+                retry_after_s=retry_after_s,
+                wait_s=wait,
+            )
+            await asyncio.sleep(wait + 0.25)
+    # Every attempt was a short-retryable 429 but we ran out of attempts.
+    raise RateLimitedError(provider, retry_after_s)
 
 
 @dataclass(slots=True)
@@ -96,8 +168,12 @@ class OllamaClient:
             body["format"] = "json"
 
         async with httpx.AsyncClient(timeout=self.timeout) as client:
-            r = await client.post(f"{self.base_url}/api/chat", json=body)
-            r.raise_for_status()
+            r = await _post_with_429_retry(
+                client,
+                provider=self.provider,
+                url=f"{self.base_url}/api/chat",
+                json=body,
+            )
             data = r.json()
 
         text = (data.get("message") or {}).get("content") or ""
@@ -139,36 +215,18 @@ class GroqClient:
         if json_mode:
             body["response_format"] = {"type": "json_object"}
 
-        # Two short retries on 429 — covers per-minute throttling. If the
-        # daily token cap is hit, retry-after is hours; we bail and the
-        # orchestrator skips the run cleanly rather than marking it failed.
+        # Short retries on 429 (per-minute throttling); a long daily-cap
+        # retry-after raises RateLimitedError so the orchestrator skips the run
+        # cleanly rather than marking it failed. See _post_with_429_retry.
         async with httpx.AsyncClient(timeout=self.timeout) as client:
-            for attempt in range(3):
-                r = await client.post(
-                    f"{self.base_url}/chat/completions",
-                    json=body,
-                    headers={"Authorization": f"Bearer {self.api_key}"},
-                )
-                if r.status_code == 429:
-                    ra = r.headers.get("retry-after")
-                    try:
-                        retry_after_s = float(ra) if ra else None
-                    except ValueError:
-                        retry_after_s = None
-                    if attempt < 2 and retry_after_s is not None and retry_after_s <= 8.0:
-                        log.warning(
-                            "husn.llm.groq.429_backoff",
-                            attempt=attempt + 1,
-                            retry_after_s=retry_after_s,
-                        )
-                        await asyncio.sleep(retry_after_s + 0.25)
-                        continue
-                    raise RateLimitedError("groq", retry_after_s)
-                r.raise_for_status()
-                data = r.json()
-                break
-            else:
-                raise RateLimitedError("groq", None)
+            r = await _post_with_429_retry(
+                client,
+                provider=self.provider,
+                url=f"{self.base_url}/chat/completions",
+                json=body,
+                headers={"Authorization": f"Bearer {self.api_key}"},
+            )
+            data = r.json()
 
         choice = (data.get("choices") or [{}])[0]
         text = (choice.get("message") or {}).get("content") or ""
@@ -208,8 +266,10 @@ class AnthropicClient:
             messages.append({"role": "assistant", "content": "{"})
 
         async with httpx.AsyncClient(timeout=self.timeout) as client:
-            r = await client.post(
-                f"{self.base_url}/messages",
+            r = await _post_with_429_retry(
+                client,
+                provider=self.provider,
+                url=f"{self.base_url}/messages",
                 json={
                     "model": self.model,
                     "system": system,
@@ -223,7 +283,6 @@ class AnthropicClient:
                     "content-type": "application/json",
                 },
             )
-            r.raise_for_status()
             data = r.json()
 
         parts = data.get("content") or []

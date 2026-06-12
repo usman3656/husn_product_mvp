@@ -19,34 +19,35 @@ router = APIRouter(prefix="/api/agent", tags=["agent"])
 sync_router = APIRouter(prefix="/api/sync", tags=["sync"])
 
 
+# How long a single "Sync now" debounce lock holds. Long enough that rapid
+# clicks coalesce into one full-system run instead of stacking and shredding
+# the shared LLM quota; short enough that a genuine later refresh isn't blocked.
+_SYNC_DEBOUNCE_S = 180
+
+
 @sync_router.post("/now")
 async def sync_now(
     ctx: AuthContext = Depends(require_admin),
 ) -> dict[str, Any]:
-    """One-click 'Sync now' — fan out backfills for every source, then chain
-    normalize → extract → drift → render. The cron crons exist for steady
-    state; this is the manual refresh button for the briefing.
+    """One-click 'Sync now' — enqueue the ordered ingest → derive → render
+    pipeline (husn.workers.sync_pipeline) so render sees freshly-backfilled
+    data instead of racing it. The cron crons exist for steady state; this is
+    the manual refresh button for the briefing.
 
-    All jobs are async; we return immediately with the queued job ids.
+    Debounced so repeated clicks (or several admins) coalesce into one run
+    rather than stacking full-system syncs against the shared LLM quota.
     """
     redis = await create_pool(RedisSettings.from_dsn(get_settings().redis_url))
-    queued: dict[str, str | None] = {}
     try:
-        for job_name in (
-            "jira_backfill",
-            "slack_backfill",
-            "google_backfill",
-            "microsoft_backfill",
-            "normalize_graph",
-            "extract_claims",
-            "evaluate_drift",
-            "run_agent",
-        ):
-            job = await redis.enqueue_job(job_name)
-            queued[job_name] = job.job_id if job else None
+        acquired = await redis.set(
+            "husn:sync_now:lock", "1", ex=_SYNC_DEBOUNCE_S, nx=True
+        )
+        if not acquired:
+            return {"queued": False, "reason": "a sync is already running — try again shortly"}
+        job = await redis.enqueue_job("sync_pipeline")
     finally:
         await redis.aclose()
-    return {"queued": True, "jobs": queued}
+    return {"queued": True, "job_id": job.job_id if job else None}
 
 
 @router.get("/status")

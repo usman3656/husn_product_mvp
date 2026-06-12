@@ -4,12 +4,15 @@ import { useState } from "react";
 
 import { clientFetch } from "@/lib/api";
 
-/** Sync now — fans out backfill + normalize + extract + drift + render in one
- * click. Lives on the briefing header; admin-only on the API side (the button
- * stays mounted for members too, the request just 403s for them). */
-export function SyncNowButton() {
+/** Sync now — enqueues the ordered ingest → derive → render pipeline in one
+ * click. Admin-only: the server gates it (require_admin) and we also hide the
+ * button for non-admins so members don't click a button that only 403s. Pass
+ * `isAdmin` from the server component that knows the viewer's workspace role. */
+export function SyncNowButton({ isAdmin = false }: { isAdmin?: boolean }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+
+  if (!isAdmin) return null;
 
   async function go() {
     setBusy(true);
@@ -17,13 +20,22 @@ export function SyncNowButton() {
     try {
       const r = await clientFetch("/api/sync/now", { method: "POST" });
       if (!r.ok) {
-        const text = await r.text();
-        setMsg(`error: ${text.slice(0, 140)}`);
+        // Friendly, role-aware messages instead of dumping the raw API body.
+        if (r.status === 403) setMsg("Only workspace admins can trigger a sync.");
+        else if (r.status === 429) setMsg("A sync is already running — try again shortly.");
+        else setMsg("Couldn't start the sync. Please try again.");
         return;
       }
-      setMsg("Queued. Briefing refreshes in ~60s — reload to see it.");
-    } catch (e) {
-      setMsg(e instanceof Error ? e.message : "request failed");
+      const data = (await r.json().catch(() => null)) as
+        | { queued?: boolean; reason?: string }
+        | null;
+      if (data && data.queued === false) {
+        setMsg(data.reason ?? "A sync is already running.");
+        return;
+      }
+      setMsg("Sync started. A full refresh takes a few minutes — reload to see it.");
+    } catch {
+      setMsg("Network error — please try again.");
     } finally {
       setBusy(false);
     }
@@ -32,9 +44,11 @@ export function SyncNowButton() {
   return (
     <div className="mt-4 flex flex-wrap items-center gap-3">
       <button
+        type="button"
         onClick={go}
         disabled={busy}
-        className="rounded-full border px-4 py-1.5 text-[13px] font-medium disabled:opacity-50"
+        aria-busy={busy}
+        className="rounded-full border px-4 py-1.5 text-[13px] font-medium transition-colors disabled:opacity-50"
         style={{
           borderColor: "var(--accent)",
           background: "var(--accent)",

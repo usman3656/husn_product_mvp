@@ -501,7 +501,7 @@ class AgentRun(Base):
     tenant_id: Mapped[int | None] = mapped_column(BigInteger, index=True)  # NOT NULL at C4
     project_id: Mapped[int | None] = mapped_column(BigInteger, index=True)
     trigger: Mapped[str] = mapped_column(String(32), nullable=False)  # cron|manual|on_change
-    status: Mapped[str] = mapped_column(String(16), nullable=False, default="running")  # running|ok|failed
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="running")  # running|ok|failed|rate_limited
     model: Mapped[str] = mapped_column(String(128), nullable=False)
     provider: Mapped[str] = mapped_column(String(32), nullable=False)  # ollama|groq|anthropic|claude-cli
     started_at: Mapped[datetime] = mapped_column(
