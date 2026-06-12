@@ -96,12 +96,19 @@ async def normalize_pending(session: AsyncSession, batch_size: int = 200) -> dic
     result = await session.execute(stmt)
     pending = list(result.scalars().all())
 
+    # Snapshot the row attributes we'll need LATER, before any per-tenant
+    # setup loop runs. A rollback inside that setup loop expires every ORM
+    # object in this session — reading raw.source/kind/tenant_id afterwards
+    # would trigger an implicit sync reload inside an async context and
+    # raise MissingGreenlet. Plain tuples don't expire.
+    pending_meta = [(r.id, r.source, r.kind, r.tenant_id) for r in pending]
+
     # Default project + scope sweep is PER-TENANT (TENANCY.md C3). Bridge
     # rows carry tenant_id None and reproduce the single global 'All work'.
     # Each tenant's setup is isolated: one tenant's constraint violation must
     # never wedge the whole normalize job for everyone.
     new_scopes = 0
-    for t_id in {r.tenant_id for r in pending} or {None}:
+    for t_id in {tid for _, _, _, tid in pending_meta} or {None}:
         try:
             project = await get_or_create_default_project(session, tenant_id=t_id)
             new_scopes += await auto_scope_from_raw_artifacts(session, project.id, tenant_id=t_id)
@@ -114,16 +121,19 @@ async def normalize_pending(session: AsyncSession, batch_size: int = 200) -> dic
                 msg=str(e)[:200],
             )
 
-    counts = {"considered": len(pending), "normalized": 0, "skipped": 0, "scopes_added": new_scopes}
-    for raw in pending:
-        fn = _DISPATCH.get((raw.source, raw.kind))
+    counts = {"considered": len(pending_meta), "normalized": 0, "skipped": 0, "scopes_added": new_scopes}
+    for raw_id, raw_source, raw_kind, raw_tenant_id in pending_meta:
+        fn = _DISPATCH.get((raw_source, raw_kind))
         if fn is None:
             counts["skipped"] += 1
             continue
-        # Capture identifying fields BEFORE the call so we can log them even
-        # if the session ends up in a rolled-back state after a failure.
-        raw_id, raw_source, raw_kind = raw.id, raw.source, raw.kind
-        raw_tenant_id = raw.tenant_id
+        # If the session was rolled back during per-tenant setup, the ORM
+        # object is expired — re-load the row so the normalizer can read
+        # payload, external_id, etc. without triggering MissingGreenlet.
+        raw = await session.get(RawArtifact, raw_id)
+        if raw is None:
+            counts["skipped"] += 1
+            continue
         # Tenancy context: identity resolution inside the normalizer scopes
         # person lookup/create to this tenant (TENANCY.md C3).
         token = current_tenant_id.set(raw_tenant_id)
