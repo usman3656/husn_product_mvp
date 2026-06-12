@@ -29,7 +29,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from husn.agent.llm import get_llm_client, parse_json_response
+from husn.agent.llm import RateLimitedError, get_llm_client, parse_json_response
 from husn.agent.nli import NLIResult, verify_bullets
 from husn.agent.render import (
     PROMPT_VERSION,
@@ -167,6 +167,29 @@ async def run_renderer_for_project(
             "facts": len(skeleton.facts),
             "conflicts": len(skeleton.conflicts),
         }
+
+    except RateLimitedError as e:
+        # Groq daily/minute cap — don't mark this run as a hard failure.
+        # The next cron tick has another shot once the quota resets.
+        log.warning(
+            "husn.agent.v2.rate_limited",
+            project_id=project_id,
+            run_id=run_id,
+            retry_after_s=e.retry_after_s,
+        )
+        try:
+            await session.rollback()
+        except Exception:
+            pass
+        await _close_run(
+            session,
+            run_id=run_id,
+            status="ok",
+            error=f"rate-limited by {e.provider} — skipped",
+            started=started,
+            brief_count=0,
+        )
+        return {"run_id": run_id, "status": "rate_limited", "briefs": 0}
 
     except Exception as e:
         log.exception("husn.agent.v2.failed", project_id=project_id, run_id=run_id)

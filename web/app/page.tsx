@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { Pulse as PulseStrip, type PulseDatum } from "@/components/pulse";
 import { ReachOutButton, type ReachOutContext } from "@/components/reach-out";
+import { SyncNowButton } from "@/components/sync-now-button";
 import { serverJson } from "@/lib/api";
 
 /* ============================================================
@@ -269,6 +270,7 @@ export default async function Briefing() {
         <p className="husn-prose mt-5 max-w-[60ch]">
           {leadIn(findings.length, conf)}
         </p>
+        <SyncNowButton />
       </header>
 
       {/* 1. Organizational Pulse */}
@@ -336,6 +338,7 @@ function BriefingAwaiting() {
           Connect a tool and Husn will start reading. Your first briefing
           builds within about an hour of the first sync.
         </p>
+        <SyncNowButton />
       </header>
 
       <section className="mt-14 husn-rise" style={{ animationDelay: "40ms" }}>

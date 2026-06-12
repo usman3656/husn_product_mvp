@@ -127,7 +127,9 @@ _BACKFILL_MS_SECONDS = {45}              # :45 — microsoft (Outlook + OneDrive
 _NORMALIZE_SECONDS = {0, 15, 30, 45}     # every 15s
 _EXTRACT_SECONDS = {5, 20, 35, 50}       # 5s after normalize
 _DRIFT_SECONDS = {10, 40}                # 5s after extract, twice/min
-_AGENT_MINUTES = {0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55}  # every 5 min at :00
+_AGENT_MINUTES = {0, 30}  # every 30 min — Groq's daily token cap on llama-3.3-70b
+                          # gets shredded by a 5-min cadence on a non-empty graph.
+                          # Manual "Sync now" still works for on-demand refresh.
 
 
 class WorkerSettings:

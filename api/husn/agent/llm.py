@@ -15,6 +15,7 @@ provider reports them.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -22,6 +23,18 @@ from typing import Any, Protocol
 import httpx
 
 from husn.core.config import get_settings
+from husn.core.logging import log
+
+
+class RateLimitedError(Exception):
+    """Provider rate-limited us (HTTP 429). The orchestrator catches this and
+    skips the run cleanly instead of marking it `failed`, so the next cron
+    tick gets a clean shot once the quota window rolls over."""
+
+    def __init__(self, provider: str, retry_after_s: float | None) -> None:
+        super().__init__(f"{provider} 429 (retry_after={retry_after_s})")
+        self.provider = provider
+        self.retry_after_s = retry_after_s
 
 
 @dataclass(slots=True)
@@ -126,14 +139,36 @@ class GroqClient:
         if json_mode:
             body["response_format"] = {"type": "json_object"}
 
+        # Two short retries on 429 — covers per-minute throttling. If the
+        # daily token cap is hit, retry-after is hours; we bail and the
+        # orchestrator skips the run cleanly rather than marking it failed.
         async with httpx.AsyncClient(timeout=self.timeout) as client:
-            r = await client.post(
-                f"{self.base_url}/chat/completions",
-                json=body,
-                headers={"Authorization": f"Bearer {self.api_key}"},
-            )
-            r.raise_for_status()
-            data = r.json()
+            for attempt in range(3):
+                r = await client.post(
+                    f"{self.base_url}/chat/completions",
+                    json=body,
+                    headers={"Authorization": f"Bearer {self.api_key}"},
+                )
+                if r.status_code == 429:
+                    ra = r.headers.get("retry-after")
+                    try:
+                        retry_after_s = float(ra) if ra else None
+                    except ValueError:
+                        retry_after_s = None
+                    if attempt < 2 and retry_after_s is not None and retry_after_s <= 8.0:
+                        log.warning(
+                            "husn.llm.groq.429_backoff",
+                            attempt=attempt + 1,
+                            retry_after_s=retry_after_s,
+                        )
+                        await asyncio.sleep(retry_after_s + 0.25)
+                        continue
+                    raise RateLimitedError("groq", retry_after_s)
+                r.raise_for_status()
+                data = r.json()
+                break
+            else:
+                raise RateLimitedError("groq", None)
 
         choice = (data.get("choices") or [{}])[0]
         text = (choice.get("message") or {}).get("content") or ""

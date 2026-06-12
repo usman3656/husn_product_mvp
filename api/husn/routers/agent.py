@@ -16,6 +16,37 @@ from husn.db.models import AgentRun, Brief, Project
 from husn.db.session import get_session
 
 router = APIRouter(prefix="/api/agent", tags=["agent"])
+sync_router = APIRouter(prefix="/api/sync", tags=["sync"])
+
+
+@sync_router.post("/now")
+async def sync_now(
+    ctx: AuthContext = Depends(require_admin),
+) -> dict[str, Any]:
+    """One-click 'Sync now' — fan out backfills for every source, then chain
+    normalize → extract → drift → render. The cron crons exist for steady
+    state; this is the manual refresh button for the briefing.
+
+    All jobs are async; we return immediately with the queued job ids.
+    """
+    redis = await create_pool(RedisSettings.from_dsn(get_settings().redis_url))
+    queued: dict[str, str | None] = {}
+    try:
+        for job_name in (
+            "jira_backfill",
+            "slack_backfill",
+            "google_backfill",
+            "microsoft_backfill",
+            "normalize_graph",
+            "extract_claims",
+            "evaluate_drift",
+            "run_agent",
+        ):
+            job = await redis.enqueue_job(job_name)
+            queued[job_name] = job.job_id if job else None
+    finally:
+        await redis.aclose()
+    return {"queued": True, "jobs": queued}
 
 
 @router.get("/status")
