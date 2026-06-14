@@ -78,7 +78,7 @@ export async function clientFetch(path: string, init?: RequestInit): Promise<Res
 export type Me = {
   authenticated: boolean;
   auth_required: boolean;
-  user?: { id: number; email: string };
+  user?: { id: number; email: string; username?: string | null; has_password?: boolean };
   workspace?: { tenant_id: number; name: string; slug: string; role: "owner" | "admin" | "member" } | null;
 };
 

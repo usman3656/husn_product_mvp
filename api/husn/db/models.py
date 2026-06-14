@@ -48,6 +48,13 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(320), nullable=False, unique=True)
     name: Mapped[str | None] = mapped_column(String(256))
     avatar_url: Mapped[str | None] = mapped_column(Text)
+    # Optional username+password credential, set up once while signed in (the
+    # email magic link stays the primary entry + recovery path). username is
+    # normalized lowercase, unique, and IMMUTABLE once set; password_hash is a
+    # bcrypt hash (NULL = no password set). See husn.auth.passwords.
+    username: Mapped[str | None] = mapped_column(String(32), unique=True)
+    password_hash: Mapped[str | None] = mapped_column(String(255))
+    password_set_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

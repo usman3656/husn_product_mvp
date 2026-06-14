@@ -24,6 +24,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from husn.auth.deps import AuthContext, csrf_check, require_user
@@ -34,10 +35,23 @@ from husn.auth.magic import (
     normalize_email,
     rate_limit_ok,
 )
+from husn.auth.passwords import (
+    CredentialError,
+    dummy_verify,
+    hash_password,
+    login_attempt_ok,
+    normalize_username,
+    reset_login_attempts,
+    validate_password,
+    validate_username,
+    verify_password,
+)
 from husn.auth.sessions import (
     COOKIE_NAME,
     create_session,
+    destroy_all_for_user,
     destroy_session,
+    read_session,
     update_session,
 )
 from husn.core.config import get_settings
@@ -117,6 +131,37 @@ def _membership_payload(db_rows: list[tuple[Membership, Tenant]]) -> list[dict[s
     ]
 
 
+async def _login_and_fork(
+    db: AsyncSession, response: Response, user: User
+) -> dict[str, Any]:
+    """Create a session for `user`, set the cookie, and return the membership
+    fork shared by magic-link consume and password login:
+      one active workspace  → {status: ok, workspace}
+      several               → {status: pick_workspace, memberships}
+      none                  → {status: no_workspace, email}
+    """
+    rows = (
+        await db.execute(
+            select(Membership, Tenant)
+            .join(Tenant, Tenant.id == Membership.tenant_id)
+            .where(Membership.user_id == user.id, Membership.status == "active")
+        )
+    ).all()
+    memberships = [(m, t) for m, t in rows]
+
+    if len(memberships) == 1:
+        m, t = memberships[0]
+        sid = await create_session(user.id, user.email, active_tenant_id=t.id)
+        _set_cookie(response, sid)
+        return {"status": "ok", "workspace": {"tenant_id": t.id, "name": t.name, "role": m.role}}
+
+    sid = await create_session(user.id, user.email, active_tenant_id=None)
+    _set_cookie(response, sid)
+    if len(memberships) == 0:
+        return {"status": "no_workspace", "email": user.email}
+    return {"status": "pick_workspace", "memberships": _membership_payload(memberships)}
+
+
 # ---------------- endpoints ----------------
 
 
@@ -158,27 +203,150 @@ async def magic_consume(
         raise HTTPException(400, "invalid or expired link")
 
     user = await _jit_user(db, email)
+    return await _login_and_fork(db, response, user)
 
-    rows = (
-        await db.execute(
-            select(Membership, Tenant)
-            .join(Tenant, Tenant.id == Membership.tenant_id)
-            .where(Membership.user_id == user.id, Membership.status == "active")
-        )
-    ).all()
-    memberships = [(m, t) for m, t in rows]
 
-    if len(memberships) == 1:
-        m, t = memberships[0]
-        sid = await create_session(user.id, email, active_tenant_id=t.id)
-        _set_cookie(response, sid)
-        return {"status": "ok", "workspace": {"tenant_id": t.id, "name": t.name, "role": m.role}}
+# ---------------- username + password credential ----------------
 
-    sid = await create_session(user.id, email, active_tenant_id=None)
+
+class PasswordLoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+@router.post("/login/password")
+async def password_login(
+    body: PasswordLoginRequest,
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Sign in with username + password. Same membership fork as magic consume.
+
+    Login-CSRF guarded (like magic consume). Generic error on any failure — no
+    username enumeration — and a dummy hash on missing user/credential so the
+    response time doesn't reveal which usernames exist.
+    """
+    csrf_check(request)
+    username = normalize_username(body.username)
+    if not username or not body.password:
+        raise HTTPException(401, "invalid username or password")
+    if not await login_attempt_ok(username):
+        raise HTTPException(429, "too many attempts — wait a few minutes and try again")
+
+    user = (
+        await db.execute(select(User).where(User.username == username))
+    ).scalar_one_or_none()
+    if user is None or user.password_hash is None:
+        dummy_verify()  # equalize timing with the real-verify path
+        raise HTTPException(401, "invalid username or password")
+    if not verify_password(body.password, user.password_hash):
+        raise HTTPException(401, "invalid username or password")
+
+    await reset_login_attempts(username)
+    user.last_login_at = datetime.now(UTC)  # security audit only; never rendered
+    await db.commit()
+    log.info("husn.auth.password_login", user_id=user.id)
+    return await _login_and_fork(db, response, user)
+
+
+class PasswordSetupRequest(BaseModel):
+    username: str
+    password: str
+
+
+@router.post("/password/setup")
+async def password_setup(
+    body: PasswordSetupRequest,
+    db: AsyncSession = Depends(get_session),
+    ctx: AuthContext = Depends(require_user),
+) -> dict[str, Any]:
+    """First-time setup of the username+password credential, for a signed-in
+    user. The username is set ONCE and cannot be changed afterwards (use the
+    email magic link to recover, then change the password here)."""
+    if ctx.user_id is None:
+        raise HTTPException(401, "sign in first")
+    user = await db.get(User, ctx.user_id)
+    if user is None:
+        raise HTTPException(401, "sign in first")
+    if user.username is not None:
+        raise HTTPException(409, "username is already set and cannot be changed")
+
+    try:
+        username = validate_username(body.username)
+        validate_password(body.password)
+    except CredentialError as e:
+        raise HTTPException(422, str(e)) from e
+
+    taken = (
+        await db.execute(select(User).where(User.username == username))
+    ).scalar_one_or_none()
+    if taken is not None:
+        raise HTTPException(409, "that username is taken")
+
+    user.username = username
+    user.password_hash = hash_password(body.password)
+    user.password_set_at = datetime.now(UTC)
+    try:
+        await db.commit()
+    except IntegrityError as e:
+        # Lost the race against a concurrent claim of the same username — the
+        # DB unique constraint is the source of truth; surface it cleanly.
+        await db.rollback()
+        raise HTTPException(409, "that username is taken") from e
+    log.info("husn.auth.password_setup", user_id=user.id)
+    return {"status": "ok", "username": username}
+
+
+class PasswordChangeRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
+@router.post("/password/change")
+async def password_change(
+    body: PasswordChangeRequest,
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_session),
+    ctx: AuthContext = Depends(require_user),
+) -> dict[str, Any]:
+    """Change the password (requires the current one). Username is unchanged.
+
+    Revokes every existing session for the user (so a stolen session can't
+    survive a password reset) and re-issues a fresh one for the caller.
+    """
+    if ctx.user_id is None:
+        raise HTTPException(401, "sign in first")
+    user = await db.get(User, ctx.user_id)
+    if user is None or user.password_hash is None:
+        raise HTTPException(409, "no password set yet — set one up first")
+    if not verify_password(body.current_password, user.password_hash):
+        raise HTTPException(403, "current password is incorrect")
+
+    try:
+        validate_password(body.new_password)
+    except CredentialError as e:
+        raise HTTPException(422, str(e)) from e
+
+    user.password_hash = hash_password(body.new_password)
+    user.password_set_at = datetime.now(UTC)
+    await db.commit()
+
+    # Preserve the caller's active workspace, then kill all sessions and mint a
+    # fresh one so this device stays signed in while every other session dies.
+    old_sid = request.cookies.get(COOKIE_NAME)
+    active_tenant_id = None
+    if old_sid:
+        old = await read_session(old_sid)
+        if old:
+            active_tenant_id = old.get("active_tenant_id")
+    await destroy_all_for_user(user.id)
+    sid = await create_session(user.id, user.email, active_tenant_id=active_tenant_id)
     _set_cookie(response, sid)
-    if len(memberships) == 0:
-        return {"status": "no_workspace", "email": email}
-    return {"status": "pick_workspace", "memberships": _membership_payload(memberships)}
+
+    log.info("husn.auth.password_change", user_id=user.id)
+    return {"status": "ok"}
 
 
 class WorkspaceCreate(BaseModel):
@@ -284,9 +452,15 @@ async def me(
         if t:
             workspace = {"tenant_id": t.id, "name": t.name, "slug": t.slug, "role": ctx.role}
 
+    user = await db.get(User, ctx.user_id)
     return {
         "authenticated": True,
         "auth_required": get_settings().auth_required,
-        "user": {"id": ctx.user_id, "email": ctx.email},
+        "user": {
+            "id": ctx.user_id,
+            "email": ctx.email,
+            "username": user.username if user else None,
+            "has_password": bool(user and user.password_hash),
+        },
         "workspace": workspace,
     }

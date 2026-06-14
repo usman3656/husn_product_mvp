@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { AccountPanel } from "@/components/account-panel";
 import { MembersPanel } from "@/components/members-panel";
+import { PasswordPanel } from "@/components/password-panel";
 
 export const metadata = { title: "Settings · Husn" };
 
@@ -25,6 +26,7 @@ export default function SettingsPage() {
 
         <Group title="Account">
           <AccountPanel />
+          <PasswordPanel />
         </Group>
 
         <Group title="Members">
