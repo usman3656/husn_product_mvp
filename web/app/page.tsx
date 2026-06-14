@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { DealtWithButton } from "@/components/dealt-with-button";
 import { Pulse as PulseStrip, type PulseDatum } from "@/components/pulse";
 import { ReachOutButton, type ReachOutContext } from "@/components/reach-out";
 import { SyncNowButton } from "@/components/sync-now-button";
@@ -713,6 +714,7 @@ function ConsequentialIssue({ f }: { f: Finding }) {
           <SecondaryAction href={`/ask?q=${encodeURIComponent("Why is " + cleanTitle(f).toLowerCase() + " happening?")}`}>Ask Husn</SecondaryAction>
           <ReachOutButton context={ctx} variant="primary">Reach Out For Me</ReachOutButton>
           <GhostAction href={`/investigations/${f.id}?action=collect`}>Collect missing information</GhostAction>
+          <DealtWithButton findingId={f.id} />
         </div>
       </div>
     </article>
@@ -781,12 +783,12 @@ function RiskList({ items }: { items: Finding[] }) {
       {items.map((f) => {
         const tone: SemanticTone = f.severity === "high" ? "conflict" : "uncertain";
         return (
-          <li key={f.id}>
-            <Link
-              href={`/investigations/${f.id}`}
-              className="block rounded-[var(--radius)] border px-5 py-4 husn-lift"
-              style={{ borderColor: "var(--border)", background: "var(--panel)" }}
-            >
+          <li
+            key={f.id}
+            className="rounded-[var(--radius)] border husn-lift"
+            style={{ borderColor: "var(--border)", background: "var(--panel)" }}
+          >
+            <Link href={`/investigations/${f.id}`} className="block px-5 pt-4 pb-2">
               <div className="flex items-start gap-3">
                 <SeverityDot tone={tone} />
                 <div className="min-w-0 flex-1">
@@ -800,6 +802,9 @@ function RiskList({ items }: { items: Finding[] }) {
                 <span aria-hidden className="shrink-0 self-center text-[14px]" style={{ color: "var(--muted)" }}>→</span>
               </div>
             </Link>
+            <div className="flex justify-end px-5 pb-3">
+              <DealtWithButton findingId={f.id} size="sm" />
+            </div>
           </li>
         );
       })}
@@ -848,6 +853,7 @@ function MissingList({ items }: { items: Finding[] }) {
                   >
                     See evidence
                   </Link>
+                  <DealtWithButton findingId={f.id} size="sm" />
                 </div>
               </div>
             </div>

@@ -1,3 +1,4 @@
+import { DealtWithButton } from "@/components/dealt-with-button";
 import { CardHeader, EvidenceChip, Pill, Tile } from "@/components/ui";
 import { serverFetch, serverJson } from "@/lib/api";
 
@@ -169,6 +170,10 @@ function FindingRow({ finding }: { finding: Finding }) {
             ))}
           </div>
         ))}
+      </div>
+
+      <div className="mt-3 flex justify-end">
+        <DealtWithButton findingId={finding.id} size="sm" />
       </div>
     </li>
   );

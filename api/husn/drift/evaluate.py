@@ -18,6 +18,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from husn.core.logging import log
 from husn.db.models import Claim, ClaimGroup, ClaimGroupMember, Finding, FindingEvidence
+from husn.drift.dispositions import (
+    delete_disposition,
+    get_disposition,
+    value_signature,
+)
 from husn.drift.grouping import assign_unassigned_claims
 from husn.drift.rules import ALL_RULES, DriftRule
 
@@ -51,6 +56,7 @@ async def _evaluate_rule(session: AsyncSession, rule: DriftRule) -> dict[str, in
     opened = 0
     closed = 0
     in_sync = 0
+    suppressed = 0
 
     for grp in groups:
         claims = (
@@ -79,6 +85,33 @@ async def _evaluate_rule(session: AsyncSession, rule: DriftRule) -> dict[str, in
             summary, details = await rule.build_summary(
                 session, group=grp, primary_claims=primary_claims
             )
+
+            # TPM "dealt with" suppression. Keyed on the stable issue identity
+            # (rule_id, claim_group_id), it survives the per-tick recreation of
+            # findings. If the conflicting values are unchanged since it was
+            # dealt with, stay silent; if they changed, drop the disposition and
+            # let the (now genuinely different) issue resurface.
+            disp = await get_disposition(
+                session,
+                tenant_id=grp.tenant_id,
+                rule_id=rule.rule_id,
+                claim_group_id=grp.id,
+            )
+            if disp is not None:
+                if disp.value_signature == value_signature(details):
+                    if existing is not None:  # defensive: never leave it open
+                        existing.status = "snoozed"
+                        existing.updated_at = datetime.now(UTC)
+                    suppressed += 1
+                    continue
+                # Materially changed — let it come back.
+                await delete_disposition(
+                    session,
+                    tenant_id=grp.tenant_id,
+                    rule_id=rule.rule_id,
+                    claim_group_id=grp.id,
+                )
+
             await _upsert_finding(
                 session,
                 rule=rule,
@@ -103,6 +136,7 @@ async def _evaluate_rule(session: AsyncSession, rule: DriftRule) -> dict[str, in
         "in_sync": in_sync,
         "open_findings_changed": opened,
         "closed": closed,
+        "suppressed": suppressed,
     }
 
 

@@ -479,6 +479,43 @@ class Finding(Base):
     )
 
 
+class FindingDisposition(Base):
+    """A TPM's "this has been dealt with" decision on a drift issue.
+
+    The drift evaluator re-creates a fresh OPEN finding every tick while the
+    drift persists (it only de-dupes against OPEN rows), so a disposition must
+    live OUTSIDE the finding row, keyed on the issue's STABLE identity
+    (tenant_id, rule_id, claim_group_id). The evaluator checks it before
+    opening and suppresses the finding.
+
+    value_signature is a hash of the conflicting values (details.distinct_values)
+    at the moment it was dealt with. If the conflict later changes to DIFFERENT
+    values, the signature no longer matches and the issue resurfaces — "the same
+    issue stays gone, a genuinely new one comes back." NULL signature = suppress
+    regardless of value (findings without distinct_values).
+    """
+
+    __tablename__ = "finding_dispositions"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int | None] = mapped_column(BigInteger, index=True)
+    rule_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    claim_group_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    value_signature: Mapped[str | None] = mapped_column(String(64))
+    summary: Mapped[str | None] = mapped_column(Text)  # snapshot for audit/UI
+    created_by: Mapped[int | None] = mapped_column(BigInteger)  # user_id
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "rule_id", "claim_group_id",
+            name="uq_disposition_tenant_rule_group",
+        ),
+    )
+
+
 class FindingEvidence(Base):
     """The verbatim source claims a finding cites.
 
