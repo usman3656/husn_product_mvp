@@ -29,6 +29,7 @@ from husn.graph.normalizers.microsoft import (
     normalize_ms_office_sheet,
     normalize_ms_office_slides,
 )
+from husn.graph.normalizers.granola import normalize_granola_meeting
 from husn.graph.normalizers.jira import normalize_jira_issue, normalize_jira_project
 from husn.graph.normalizers.slack import (
     normalize_slack_channel,
@@ -58,6 +59,7 @@ _DISPATCH: dict[tuple[str, str], Callable[..., Awaitable[Any]]] = {
     ("microsoft", "office_slides"): normalize_ms_office_slides,
     ("microsoft", "drive_file"): normalize_ms_drive_file,
     ("microsoft", "drive_folder"): normalize_ms_drive_folder,
+    ("granola", "meeting"): normalize_granola_meeting,
 }
 
 

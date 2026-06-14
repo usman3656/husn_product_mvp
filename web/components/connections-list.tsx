@@ -47,7 +47,7 @@ type FilesResponse = {
   showing: number;
 };
 
-const SOURCE_LABEL: Record<string, string> = { slack: "Slack", jira: "Jira", google: "Google", microsoft: "Microsoft" };
+const SOURCE_LABEL: Record<string, string> = { slack: "Slack", jira: "Jira", google: "Google", microsoft: "Microsoft", granola: "Granola" };
 
 function timeAgo(iso: string | null): string {
   if (!iso) return "never";
@@ -144,7 +144,7 @@ export function ConnectionsList() {
           <ul className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-3">
             {unconnected.map((p) => (
               <li key={p.source}>
-                <ConnectCard provider={p} />
+                <ConnectCard provider={p} onConnected={refresh} />
               </li>
             ))}
           </ul>
@@ -191,6 +191,9 @@ type Provider = {
   source: string;
   label: string;
   blurb: string;
+  // OAuth providers redirect to a consent screen; "apikey" providers (Granola)
+  // take a pasted key via a POST form.
+  kind: "oauth" | "apikey";
   authPath: string;
 };
 
@@ -199,29 +202,43 @@ const ALL_PROVIDERS: Provider[] = [
     source: "slack",
     label: "Slack",
     blurb: "The conversations where decisions actually happen.",
+    kind: "oauth",
     authPath: "/auth/slack/start",
   },
   {
     source: "jira",
     label: "Jira",
     blurb: "Issues, dates, status, ownership.",
+    kind: "oauth",
     authPath: "/auth/jira/start",
   },
   {
     source: "google",
     label: "Google",
     blurb: "Gmail · Drive · Docs · Sheets.",
+    kind: "oauth",
     authPath: "/auth/google/start",
   },
   {
     source: "microsoft",
     label: "Microsoft",
     blurb: "Outlook · OneDrive · Office files.",
+    kind: "oauth",
     authPath: "/auth/microsoft/start",
+  },
+  {
+    source: "granola",
+    label: "Granola",
+    blurb: "AI meeting notes — summaries of every call.",
+    kind: "apikey",
+    authPath: "/auth/granola/connect",
   },
 ];
 
-function ConnectCard({ provider }: { provider: Provider }) {
+function ConnectCard({ provider, onConnected }: { provider: Provider; onConnected: () => void }) {
+  if (provider.kind === "apikey") {
+    return <ApiKeyConnectCard provider={provider} onConnected={onConnected} />;
+  }
   // Normal browser navigation: the API redirects (302) to the provider's
   // OAuth consent screen, and consent → /auth/<provider>/callback comes
   // back to api.husn.io. XHR / fetch cannot follow OAuth redirects.
@@ -251,6 +268,111 @@ function ConnectCard({ provider }: { provider: Provider }) {
         </span>
       </div>
     </a>
+  );
+}
+
+function ApiKeyConnectCard({ provider, onConnected }: { provider: Provider; onConnected: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [key, setKey] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    const v = key.trim();
+    if (!v || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await clientFetch(provider.authPath, {
+        method: "POST",
+        body: JSON.stringify({ api_key: v }),
+      });
+      if (!r.ok) {
+        const detail = await r.json().then((j) => j?.detail).catch(() => null);
+        setError(typeof detail === "string" ? detail : "Couldn't connect. Check the key and try again.");
+        return;
+      }
+      setKey("");
+      setOpen(false);
+      onConnected();
+    } catch {
+      setError("Network error. Try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div
+      className="rounded-[var(--radius)] border px-5 py-5"
+      style={{ borderColor: "var(--border)", background: "var(--panel)" }}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-[15px] font-semibold" style={{ color: "var(--text)" }}>
+            {provider.label}
+          </p>
+          <p className="mt-1 text-[13px] leading-relaxed" style={{ color: "var(--muted)" }}>
+            {provider.blurb}
+          </p>
+        </div>
+        {!open ? (
+          <button
+            type="button"
+            onClick={() => setOpen(true)}
+            className="shrink-0 inline-flex items-center gap-1 rounded-full border px-3 py-1 text-[12.5px] font-medium"
+            style={{ background: "var(--text)", color: "var(--bg)", borderColor: "var(--text)" }}
+          >
+            Connect →
+          </button>
+        ) : null}
+      </div>
+
+      {open ? (
+        <form onSubmit={submit} className="mt-4">
+          <label htmlFor="granola-key" className="husn-eyebrow" style={{ fontSize: 10.5 }}>
+            API key
+          </label>
+          <input
+            id="granola-key"
+            type="password"
+            autoFocus
+            autoComplete="off"
+            value={key}
+            onChange={(e) => setKey(e.target.value)}
+            placeholder="grn_…"
+            className="mt-2 w-full rounded-[10px] border px-3 py-2 text-[14px] focus:outline-none"
+            style={{ borderColor: "var(--border-strong)", background: "var(--panel)", color: "var(--text)" }}
+          />
+          <p className="mt-2 text-[12px] leading-relaxed" style={{ color: "var(--muted)" }}>
+            In the Granola desktop app: Settings → Connectors → API keys → Create new key
+            (Business plan or higher).
+          </p>
+          <div className="mt-3 flex items-center gap-2">
+            <button
+              type="submit"
+              disabled={busy || !key.trim()}
+              className="rounded-full border px-4 py-1.5 text-[13px] font-semibold disabled:opacity-50"
+              style={{ background: "var(--text)", color: "var(--bg)", borderColor: "var(--text)" }}
+            >
+              {busy ? "Connecting…" : "Connect"}
+            </button>
+            <button
+              type="button"
+              onClick={() => { setOpen(false); setError(null); }}
+              className="text-[13px] font-medium"
+              style={{ color: "var(--muted)" }}
+            >
+              Cancel
+            </button>
+          </div>
+          {error ? (
+            <p className="mt-3 text-[13px]" style={{ color: "var(--danger-ink)" }}>{error}</p>
+          ) : null}
+        </form>
+      ) : null}
+    </div>
   );
 }
 

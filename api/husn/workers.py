@@ -5,6 +5,8 @@ from husn.agent.run_v2 import run_renderer_for_all_projects
 from husn.claims.extract import extract_pending as claims_extract_pending
 from husn.connectors.google.backfill import backfill_connection as google_backfill_connection
 from husn.connectors.google.backfill import get_connections as google_get_connections
+from husn.connectors.granola.backfill import backfill_connection as granola_backfill_connection
+from husn.connectors.granola.backfill import get_connections as granola_get_connections
 from husn.connectors.jira.backfill import backfill_connection as jira_backfill_connection
 from husn.connectors.jira.backfill import get_connections as jira_get_connections
 from husn.connectors.microsoft.backfill import backfill_connection as microsoft_backfill_connection
@@ -90,6 +92,18 @@ async def microsoft_backfill(ctx: dict, connection_id: int | None = None) -> dic
     return summary
 
 
+async def granola_backfill(ctx: dict, connection_id: int | None = None) -> dict:
+    summary: dict[int, dict] = {}
+    async with SessionLocal() as session:
+        connections = await _resolve_connections(
+            session, "granola", connection_id, granola_get_connections
+        )
+        for conn in connections:
+            summary[conn.id] = await granola_backfill_connection(session, conn)
+    log.info("husn.worker.granola_backfill.done", summary=summary)
+    return summary
+
+
 async def normalize_graph(ctx: dict) -> dict:
     """Sweep new raw_artifacts into the operational graph. Idempotent."""
     async with SessionLocal() as session:
@@ -127,6 +141,7 @@ _SYNC_PIPELINE: tuple = (
     ("slack_backfill", slack_backfill),
     ("google_backfill", google_backfill),
     ("microsoft_backfill", microsoft_backfill),
+    ("granola_backfill", granola_backfill),
     ("normalize_graph", normalize_graph),
     ("extract_claims", extract_claims),
     ("evaluate_drift", evaluate_drift),
@@ -158,6 +173,7 @@ _BACKFILL_JIRA_SECONDS = {0}             # :00 — jira backfill
 _BACKFILL_GOOGLE_SECONDS = {15}          # :15 — google (Gmail + Drive)
 _BACKFILL_SLACK_SECONDS = {30}           # :30 — slack backfill
 _BACKFILL_MS_SECONDS = {45}              # :45 — microsoft (Outlook + OneDrive)
+_BACKFILL_GRANOLA_SECONDS = {52}         # :52 — granola (meeting notes; incremental)
 _NORMALIZE_SECONDS = {0, 15, 30, 45}     # every 15s
 _EXTRACT_SECONDS = {5, 20, 35, 50}       # 5s after normalize
 _DRIFT_SECONDS = {10, 40}                # 5s after extract, twice/min
@@ -179,12 +195,14 @@ class WorkerSettings:
         evaluate_drift,
         run_agent,
         sync_pipeline,
+        granola_backfill,
     ]
     cron_jobs = [
         cron(jira_backfill, second=_BACKFILL_JIRA_SECONDS, run_at_startup=True),
         cron(google_backfill, second=_BACKFILL_GOOGLE_SECONDS, run_at_startup=True),
         cron(slack_backfill, second=_BACKFILL_SLACK_SECONDS, run_at_startup=True),
         cron(microsoft_backfill, second=_BACKFILL_MS_SECONDS, run_at_startup=True),
+        cron(granola_backfill, second=_BACKFILL_GRANOLA_SECONDS, run_at_startup=True),
         cron(normalize_graph, second=_NORMALIZE_SECONDS, run_at_startup=True),
         cron(extract_claims, second=_EXTRACT_SECONDS, run_at_startup=True),
         cron(evaluate_drift, second=_DRIFT_SECONDS, run_at_startup=True),

@@ -51,7 +51,7 @@ async def build_dossier(session: AsyncSession, *, project_id: int) -> dict[str, 
 
     # Recent artifacts, capped per source, ordered by occurred_at
     artifacts_rows: list[Artifact] = []
-    for source in ("jira", "slack", "google"):
+    for source in ("jira", "slack", "google", "granola"):
         rows = (
             await session.execute(
                 select(Artifact)

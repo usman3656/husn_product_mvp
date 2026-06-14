@@ -11,6 +11,7 @@ from husn.routers import (
     artifacts,
     atlassian_personal_data,
     auth_google,
+    auth_granola,
     auth_jira,
     auth_login,
     auth_microsoft,
@@ -64,6 +65,7 @@ app.include_router(auth_google.router)
 app.include_router(google_admin.router)
 app.include_router(auth_microsoft.router)
 app.include_router(microsoft_admin.router)
+app.include_router(auth_granola.router)
 app.include_router(connections.router)
 app.include_router(artifacts.router)
 app.include_router(graph.router)
