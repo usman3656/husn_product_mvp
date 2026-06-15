@@ -55,6 +55,38 @@ def make_state(
     return f"{_b64url(body)}.{_b64url(sig)}"
 
 
+def sign_token(payload: dict, *, source: str) -> str:
+    """Generic signed, self-describing token (HMAC-SHA256 over the JSON body).
+    Carries arbitrary fields plus a timestamp and `source` tag. Used for the
+    Slack account-link links the bot DMs out."""
+    body = json.dumps(
+        {**payload, "source": source, "ts": int(time.time())}, separators=(",", ":")
+    ).encode("utf-8")
+    sig = hmac.new(_key(), body, hashlib.sha256).digest()
+    return f"{_b64url(body)}.{_b64url(sig)}"
+
+
+def read_token(token: str, *, expected_source: str, max_age_s: int) -> dict | None:
+    """Verify signature, source, and freshness; return the payload or None."""
+    try:
+        body_b64, sig_b64 = token.split(".", 1)
+        body = _b64url_decode(body_b64)
+        sig = _b64url_decode(sig_b64)
+    except (ValueError, base64.binascii.Error):
+        return None
+    if not hmac.compare_digest(sig, hmac.new(_key(), body, hashlib.sha256).digest()):
+        return None
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError:
+        return None
+    if payload.get("source") != expected_source:
+        return None
+    if int(time.time()) - int(payload.get("ts", 0)) > max_age_s:
+        return None
+    return payload
+
+
 def verify_state(state: str, *, expected_source: str) -> bool:
     return parse_state(state, expected_source=expected_source) is not None
 

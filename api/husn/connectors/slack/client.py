@@ -84,6 +84,22 @@ class SlackClient:
             params["cursor"] = cursor
         return await self._call("users.list", params)
 
+    async def open_im(self, *, user_id: str) -> str | None:
+        """conversations.open — returns the DM channel id for a user. Requires
+        `im:write`. Use this before DMing (more reliable than passing a user id
+        straight to chat.postMessage)."""
+        url = f"{SLACK_API_BASE}/conversations.open"
+        headers = {
+            "Authorization": f"Bearer {self.token}",
+            "Content-Type": "application/json; charset=utf-8",
+        }
+        r = await self._client.post(url, json={"users": user_id}, headers=headers)
+        r.raise_for_status()
+        data = r.json()
+        if not data.get("ok"):
+            raise RuntimeError(f"slack conversations.open failed: {data.get('error')}")
+        return (data.get("channel") or {}).get("id")
+
     async def post_message(
         self, *, channel: str, text: str, thread_ts: str | None = None
     ) -> dict[str, Any]:

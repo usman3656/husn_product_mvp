@@ -479,6 +479,27 @@ class Finding(Base):
     )
 
 
+class SlackIdentity(Base):
+    """Links a Slack user to a Husn account, so the Slack bot answers as that
+    user (per-user access model). Created via a signed link the bot DMs to the
+    user, confirmed while signed in to Husn."""
+
+    __tablename__ = "slack_identities"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    slack_team_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    slack_user_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    user_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    tenant_id: Mapped[int | None] = mapped_column(BigInteger, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint("slack_team_id", "slack_user_id", name="uq_slack_identity_team_user"),
+    )
+
+
 class FindingDisposition(Base):
     """A TPM's "this has been dealt with" decision on a drift issue.
 

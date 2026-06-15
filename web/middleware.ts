@@ -21,6 +21,10 @@ const PUBLIC_PATHS = [
   "/privacy",
   "/terms",
   "/subprocessors",
+  // The Slack link page must keep its ?token=… in the URL even when the user
+  // isn't signed in yet — it handles the signed-out case itself rather than
+  // being bounced through /login (which would strip the token).
+  "/slack/link",
 ];
 
 const COOKIE_NAME = "husn_session";
