@@ -1,5 +1,6 @@
-from arq import cron
+from arq import create_pool, cron
 from arq.connections import RedisSettings
+from sqlalchemy import text
 
 from husn.agent.run_v2 import run_renderer_for_all_projects
 from husn.claims.extract import extract_pending as claims_extract_pending
@@ -168,20 +169,48 @@ async def sync_pipeline(ctx: dict) -> dict:
     return out
 
 
-# Cron schedules — drift-tolerant offsets so the jobs don't pile up.
-_BACKFILL_JIRA_SECONDS = {0}             # :00 — jira backfill
-_BACKFILL_GOOGLE_SECONDS = {15}          # :15 — google (Gmail + Drive)
-_BACKFILL_SLACK_SECONDS = {30}           # :30 — slack backfill
-_BACKFILL_MS_SECONDS = {45}              # :45 — microsoft (Outlook + OneDrive)
-_BACKFILL_GRANOLA_SECONDS = {52}         # :52 — granola (meeting notes; incremental)
-_NORMALIZE_SECONDS = {0, 15, 30, 45}     # every 15s
-_EXTRACT_SECONDS = {5, 20, 35, 50}       # 5s after normalize
-_DRIFT_SECONDS = {10, 40}                # 5s after extract, twice/min
-_AGENT_MINUTES = {0, 30}  # every 30 min — Groq's daily token cap on llama-3.3-70b
-                          # gets shredded by a 5-min cadence on a non-empty graph.
-                          # Manual "Sync now" still works for on-demand refresh.
+async def auto_sync_tick(ctx: dict) -> dict:
+    """Fires every minute, but only enqueues the full sync_pipeline when sync
+    mode is 'automatic' AND interval_minutes have elapsed since the last run.
+
+    Manual mode (the default) → no-op: nothing ingests/renders automatically,
+    only the 'Sync now' button does. The elapsed-check + timestamp stamp is a
+    single atomic UPDATE ... RETURNING so two concurrent ticks can't double-fire,
+    and so a long pipeline doesn't get re-triggered before it finishes.
+    """
+    async with SessionLocal() as session:
+        claimed = (
+            await session.execute(
+                text(
+                    """
+                    UPDATE sync_settings
+                       SET last_run_at = now()
+                     WHERE id = 1
+                       AND mode = 'automatic'
+                       AND (last_run_at IS NULL
+                            OR last_run_at < now() - make_interval(mins => interval_minutes))
+                    RETURNING id
+                    """
+                )
+            )
+        ).first()
+        await session.commit()
+    if claimed is None:
+        return {"ran": False}
+
+    redis = await create_pool(RedisSettings.from_dsn(settings.redis_url))
+    try:
+        await redis.enqueue_job("sync_pipeline")
+    finally:
+        await redis.close()
+    log.info("husn.worker.auto_sync.enqueued")
+    return {"ran": True}
 
 
+# Auto-sync cadence is now data-driven (sync_settings), not a fixed cron. The
+# per-source backfill / normalize / extract / drift / agent crons are gone:
+# ingestion runs ONLY via sync_pipeline — manually (Sync now) or, in automatic
+# mode, when auto_sync_tick decides the interval has elapsed.
 class WorkerSettings:
     redis_settings = RedisSettings.from_dsn(settings.redis_url)
     functions: list = [
@@ -190,25 +219,19 @@ class WorkerSettings:
         slack_backfill,
         google_backfill,
         microsoft_backfill,
+        granola_backfill,
         normalize_graph,
         extract_claims,
         evaluate_drift,
         run_agent,
         sync_pipeline,
-        granola_backfill,
+        auto_sync_tick,
     ]
     cron_jobs = [
-        cron(jira_backfill, second=_BACKFILL_JIRA_SECONDS, run_at_startup=True),
-        cron(google_backfill, second=_BACKFILL_GOOGLE_SECONDS, run_at_startup=True),
-        cron(slack_backfill, second=_BACKFILL_SLACK_SECONDS, run_at_startup=True),
-        cron(microsoft_backfill, second=_BACKFILL_MS_SECONDS, run_at_startup=True),
-        cron(granola_backfill, second=_BACKFILL_GRANOLA_SECONDS, run_at_startup=True),
-        cron(normalize_graph, second=_NORMALIZE_SECONDS, run_at_startup=True),
-        cron(extract_claims, second=_EXTRACT_SECONDS, run_at_startup=True),
-        cron(evaluate_drift, second=_DRIFT_SECONDS, run_at_startup=True),
-        # Agent every 30 min (_AGENT_MINUTES); second=0 so the cost is borne at
-        # the top of each window. Manual "Sync now" → sync_pipeline for on-demand.
-        cron(run_agent, minute=_AGENT_MINUTES, second={0}),
+        # The only cron: check the sync setting once a minute and run the
+        # pipeline when automatic mode + interval say so. Manual "Sync now"
+        # (sync_pipeline via the API) is independent of this.
+        cron(auto_sync_tick, second={0}),
     ]
     on_startup = startup
     on_shutdown = shutdown

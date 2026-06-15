@@ -30,6 +30,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from husn.agent.llm import RateLimitedError, get_llm_client, parse_json_response
+from husn.usage import record_token_usage
 from husn.agent.nli import NLIResult, verify_bullets
 from husn.agent.render import (
     PROMPT_VERSION,
@@ -104,7 +105,8 @@ async def run_renderer_for_project(
         user_prompt = build_renderer_user_prompt(skeleton, personas=personas)
 
         rendered, nli_result, fallback_used, attempts = await _render_and_verify(
-            client=client, skeleton=skeleton, user_prompt=user_prompt
+            client=client, skeleton=skeleton, user_prompt=user_prompt,
+            session=session, tenant_id=tenant_id,
         )
 
         brief_count = await _persist_briefs(
@@ -240,6 +242,8 @@ async def _render_and_verify(
     client: Any,
     skeleton: Skeleton,
     user_prompt: str,
+    session: AsyncSession,
+    tenant_id: int | None,
 ) -> tuple[dict[str, Any], NLIResult | None, bool, int]:
     """Returns (sanitised_rendered, nli_result, fallback_used, attempts).
 
@@ -256,6 +260,14 @@ async def _render_and_verify(
         try:
             result = await client.complete(
                 system=RENDERER_SYSTEM_PROMPT, user=user_prompt, json_mode=True
+            )
+            await record_token_usage(
+                session,
+                tenant_id=tenant_id,
+                source="agent",
+                model=getattr(client, "model", None),
+                input_tokens=result.input_tokens,
+                output_tokens=result.output_tokens,
             )
             payload = parse_json_response(result.text)
             sanitised = validate_renderer_output(payload, skeleton)

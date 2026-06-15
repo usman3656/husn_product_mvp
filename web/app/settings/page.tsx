@@ -3,6 +3,8 @@ import Link from "next/link";
 import { AccountPanel } from "@/components/account-panel";
 import { MembersPanel } from "@/components/members-panel";
 import { PasswordPanel } from "@/components/password-panel";
+import { SyncModePanel } from "@/components/sync-mode-panel";
+import { TokenUsagePanel } from "@/components/token-usage-panel";
 
 export const metadata = { title: "Settings · Husn" };
 
@@ -19,9 +21,12 @@ export default function SettingsPage() {
 
       <section className="mt-14 space-y-12">
         <Group title="Briefing">
-          <Field label="Cadence" value="Every 30 minutes" hint="Husn re-reads your sources and updates the briefing on this cadence." />
-          <Field label="Quiet hours" value="22:00 – 07:00" hint="No live updates during these hours. The briefing still rebuilds." />
+          <SyncModePanel />
           <Field label="Personas" value="TPM, Eng Manager, QA Lead, Security Lead, Ops Manager" hint="Who Husn writes for." />
+        </Group>
+
+        <Group title="Usage">
+          <TokenUsagePanel />
         </Group>
 
         <Group title="Account">

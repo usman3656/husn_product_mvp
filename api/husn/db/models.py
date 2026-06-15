@@ -537,6 +537,45 @@ class FindingDisposition(Base):
     )
 
 
+class TokenUsage(Base):
+    """Append-only ledger of LLM token consumption, so Settings can show daily
+    usage. One row per metered LLM call. source ∈ {agent, chat, slack}."""
+
+    __tablename__ = "token_usage"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int | None] = mapped_column(BigInteger, index=True)
+    source: Mapped[str] = mapped_column(String(16), nullable=False)
+    model: Mapped[str | None] = mapped_column(String(128))
+    input_tokens: Mapped[int] = mapped_column(nullable=False, default=0)
+    output_tokens: Mapped[int] = mapped_column(nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), index=True
+    )
+
+
+class SyncSetting(Base):
+    """Single global row (id=1) controlling whether ingestion runs on a timer.
+
+    mode='manual'    — nothing runs automatically; only the 'Sync now' button
+                       (sync_pipeline) refreshes the briefing.
+    mode='automatic' — auto_sync_tick enqueues sync_pipeline every
+                       interval_minutes. Sync is process-wide (backfills are
+                       global), so this is a single global row, not per-tenant.
+    """
+
+    __tablename__ = "sync_settings"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)  # pinned to 1
+    mode: Mapped[str] = mapped_column(String(16), nullable=False, default="manual")
+    interval_minutes: Mapped[int] = mapped_column(nullable=False, default=30)
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_by: Mapped[int | None] = mapped_column(BigInteger)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
 class FindingEvidence(Base):
     """The verbatim source claims a finding cites.
 

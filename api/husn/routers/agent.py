@@ -1,10 +1,12 @@
 """Agent admin endpoints — run on demand, list briefs, list runs."""
 
+from datetime import UTC, datetime
 from typing import Any
 
 from arq import create_pool
 from arq.connections import RedisSettings
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,6 +16,7 @@ from husn.auth.scope import tenant_where
 from husn.core.config import get_settings
 from husn.db.models import AgentRun, Brief, Project
 from husn.db.session import get_session
+from husn.usage import get_sync_setting
 
 router = APIRouter(prefix="/api/agent", tags=["agent"])
 sync_router = APIRouter(prefix="/api/sync", tags=["sync"])
@@ -48,6 +51,47 @@ async def sync_now(
     finally:
         await redis.aclose()
     return {"queued": True, "job_id": job.job_id if job else None}
+
+
+@sync_router.get("/settings")
+async def get_sync_settings(
+    session: AsyncSession = Depends(get_session),
+    ctx: AuthContext = Depends(require_member),
+) -> dict[str, Any]:
+    """Current sync mode (manual/automatic + interval). Global, not per-tenant."""
+    s = await get_sync_setting(session)
+    await session.commit()  # persist the row if get_or_create just created it
+    return {
+        "mode": s.mode,
+        "interval_minutes": s.interval_minutes,
+        "last_run_at": s.last_run_at.isoformat() if s.last_run_at else None,
+    }
+
+
+class SyncSettingsUpdate(BaseModel):
+    mode: str
+    interval_minutes: int
+
+
+@sync_router.put("/settings")
+async def put_sync_settings(
+    body: SyncSettingsUpdate,
+    session: AsyncSession = Depends(get_session),
+    ctx: AuthContext = Depends(require_admin),
+) -> dict[str, Any]:
+    """Admin: switch manual/automatic and set the interval. The interval floor
+    protects the LLM daily quota."""
+    if body.mode not in ("manual", "automatic"):
+        raise HTTPException(422, "mode must be 'manual' or 'automatic'")
+    if not (5 <= body.interval_minutes <= 1440):
+        raise HTTPException(422, "interval_minutes must be between 5 and 1440")
+    s = await get_sync_setting(session)
+    s.mode = body.mode
+    s.interval_minutes = body.interval_minutes
+    s.updated_by = ctx.user_id
+    s.updated_at = datetime.now(UTC)
+    await session.commit()
+    return {"mode": s.mode, "interval_minutes": s.interval_minutes}
 
 
 @router.get("/status")

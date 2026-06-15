@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from husn.agent.chat import CHAT_HISTORY_TURNS, run_chat_turn
 from husn.agent.llm import RateLimitedError
+from husn.usage import record_token_usage
 from husn.auth.deps import AuthContext, require_member
 from husn.db.models import ChatMessage, ChatSession, Project
 from husn.db.session import get_session
@@ -238,6 +239,14 @@ async def send_message(
     )
     session.add(assistant_msg)
     sess.updated_at = datetime.now(UTC)
+    await record_token_usage(
+        session,
+        tenant_id=ctx.tenant_id,
+        source="chat",
+        model=result["model"],
+        input_tokens=result["input_tokens"],
+        output_tokens=result["output_tokens"],
+    )
     await session.commit()
 
     return {

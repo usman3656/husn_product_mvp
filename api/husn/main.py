@@ -30,6 +30,7 @@ from husn.routers import (
     slack_events,
     slack_feed,
     slack_link,
+    usage,
 )
 
 
@@ -77,6 +78,7 @@ app.include_router(claims.router)
 app.include_router(findings.router)
 app.include_router(agent.router)
 app.include_router(agent.sync_router)
+app.include_router(usage.router)
 app.include_router(chat.router)
 app.include_router(atlassian_personal_data.router)
 app.include_router(admin_diag.router)

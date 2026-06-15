@@ -25,6 +25,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from sqlalchemy import select
 
 from husn.agent.chat import run_chat_turn
+from husn.agent.llm import RateLimitedError
 from husn.connectors.slack.client import SlackClient
 from husn.core.config import get_settings
 from husn.core.logging import log
@@ -34,6 +35,7 @@ from husn.db.session import SessionLocal
 from husn.graph.projects import get_or_create_default_project
 from husn.graph.tenancy_context import current_tenant_id
 from husn.routers.slack_link import LINK_TOKEN_SOURCE
+from husn.usage import record_token_usage
 
 router = APIRouter(prefix="/slack", tags=["slack"])
 
@@ -210,6 +212,21 @@ async def _process_event(payload: dict) -> None:
                 session, project_id=project.id, history=[], user_message=asked
             )
             reply = _format_for_slack(result.get("reply") or "…")
+            await record_token_usage(
+                session,
+                tenant_id=identity.tenant_id,
+                source="slack",
+                model=result.get("model"),
+                input_tokens=result.get("input_tokens"),
+                output_tokens=result.get("output_tokens"),
+            )
+            await session.commit()
+        except RateLimitedError:
+            reply = (
+                "⏳ The model is rate-limited right now (the daily token quota is "
+                "used up). Try again a little later — switching sync to Manual in "
+                "Settings frees up quota."
+            )
         except Exception:  # noqa: BLE001
             log.exception("husn.slack.events.answer_failed", slack_user_id=slack_user_id)
             reply = "Sorry — I hit an error answering that. Try again in a moment."
