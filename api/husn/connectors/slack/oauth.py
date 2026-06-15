@@ -15,12 +15,21 @@ import httpx
 SLACK_AUTHORIZE_URL = "https://slack.com/oauth/v2/authorize"
 SLACK_TOKEN_URL = "https://slack.com/api/oauth.v2.access"
 
-# Bot Token Scopes — match docs/slack-setup.md
+# Bot Token Scopes. Read scopes power ingestion; the rest power the
+# interactive bot (receive @mentions + DMs, reply, and DM the link). These must
+# also be configured on the Slack app, or the authorize request is rejected.
 SLACK_BOT_SCOPES = [
+    # Ingestion (read)
     "channels:read",
     "channels:history",
     "users:read",
     "team:read",
+    # Interactive bot
+    "app_mentions:read",
+    "chat:write",
+    "im:read",
+    "im:history",
+    "im:write",
 ]
 
 
