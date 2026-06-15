@@ -3,26 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 
 import { clientFetch } from "@/lib/api";
-
-type SessionSummary = {
-  id: number;
-  project_id: number | null;
-  title: string;
-  created_at: string;
-  updated_at: string;
-};
-
-type Message = {
-  id: number;
-  role: "user" | "assistant" | "system";
-  content: string;
-  cited_claim_ids: number[];
-  cited_artifact_ids: number[];
-  model: string | null;
-  input_tokens: number | null;
-  output_tokens: number | null;
-  created_at: string;
-};
+import { CitedText } from "@/components/cited-text";
+import { type ChatMessage as Message, type SessionSummary } from "@/lib/chat";
 
 const SUGGESTIONS: { label: string; q: string }[] = [
   { label: "What changed this week?", q: "What changed this week across the program?" },
@@ -483,36 +465,5 @@ function Footnote({ label, kind = "neutral" }: { label: string; kind?: "neutral"
     >
       {label}
     </span>
-  );
-}
-
-function CitedText({ text }: { text: string }) {
-  const parts: (string | { kind: string; id: number; raw: string })[] = [];
-  const re = /\[(claim|artifact|finding)\s+(\d+)\]/gi;
-  let lastIdx = 0;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(text)) !== null) {
-    if (m.index > lastIdx) parts.push(text.slice(lastIdx, m.index));
-    parts.push({ kind: m[1].toLowerCase(), id: Number(m[2]), raw: m[0] });
-    lastIdx = m.index + m[0].length;
-  }
-  if (lastIdx < text.length) parts.push(text.slice(lastIdx));
-  return (
-    <>
-      {parts.map((p, i) =>
-        typeof p === "string" ? (
-          <span key={i}>{p}</span>
-        ) : (
-          <sup
-            key={i}
-            className="ml-0.5 mr-0.5 font-mono text-[10px] cursor-help"
-            style={{ color: "var(--accent-ink)" }}
-            title={`Cited ${p.kind} #${p.id}`}
-          >
-            [{p.id}]
-          </sup>
-        ),
-      )}
-    </>
   );
 }

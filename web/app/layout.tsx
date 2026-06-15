@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 
+import { ChatWidget } from "@/components/chat-widget";
 import { MobileBar, SideNav } from "@/components/side-nav";
 import { THEME_BOOT_SCRIPT } from "@/components/theme-toggle";
 
@@ -23,6 +24,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <div className="md:pl-[var(--nav-w)]">
           {children}
         </div>
+        <ChatWidget />
       </body>
     </html>
   );

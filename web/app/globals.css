@@ -296,6 +296,12 @@ h1, h2, h3, h4 { color: var(--text); letter-spacing: -0.022em; font-weight: 600;
   }
   .husn-lift { transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease; }
   .husn-lift:hover { transform: translateY(-1px); box-shadow: var(--shadow-md); border-color: var(--border-strong); }
+
+  /* Typing indicator — the three dots in the chat "thinking" state. */
+  @keyframes husn-typing {
+    0%, 100% { opacity: 0.3; transform: translateY(0); }
+    50% { opacity: 1; transform: translateY(-3px); }
+  }
 }
 
 /* Scrollbar — quiet */
