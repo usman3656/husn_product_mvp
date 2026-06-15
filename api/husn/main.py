@@ -27,6 +27,7 @@ from husn.routers import (
     members,
     microsoft_admin,
     slack_admin,
+    slack_events,
     slack_feed,
 )
 
@@ -61,6 +62,7 @@ app.include_router(jira_admin.router)
 app.include_router(auth_slack.router)
 app.include_router(slack_admin.router)
 app.include_router(slack_feed.router)
+app.include_router(slack_events.router)
 app.include_router(auth_google.router)
 app.include_router(google_admin.router)
 app.include_router(auth_microsoft.router)

@@ -83,3 +83,23 @@ class SlackClient:
         if cursor:
             params["cursor"] = cursor
         return await self._call("users.list", params)
+
+    async def post_message(
+        self, *, channel: str, text: str, thread_ts: str | None = None
+    ) -> dict[str, Any]:
+        """chat.postMessage — outbound reply. Requires the `chat:write` scope on
+        the bot token (added for the interactive bot)."""
+        url = f"{SLACK_API_BASE}/chat.postMessage"
+        headers = {
+            "Authorization": f"Bearer {self.token}",
+            "Content-Type": "application/json; charset=utf-8",
+        }
+        body: dict[str, Any] = {"channel": channel, "text": text}
+        if thread_ts:
+            body["thread_ts"] = thread_ts
+        r = await self._client.post(url, json=body, headers=headers)
+        r.raise_for_status()
+        data = r.json()
+        if not data.get("ok"):
+            raise RuntimeError(f"slack chat.postMessage failed: {data.get('error')}")
+        return data
