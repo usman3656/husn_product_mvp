@@ -101,10 +101,16 @@ class SlackClient:
         return (data.get("channel") or {}).get("id")
 
     async def post_message(
-        self, *, channel: str, text: str, thread_ts: str | None = None
+        self,
+        *,
+        channel: str,
+        text: str,
+        thread_ts: str | None = None,
+        blocks: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """chat.postMessage — outbound reply. Requires the `chat:write` scope on
-        the bot token (added for the interactive bot)."""
+        the bot token (added for the interactive bot). `text` is the fallback /
+        notification text; `blocks` adds interactive Block Kit content."""
         url = f"{SLACK_API_BASE}/chat.postMessage"
         headers = {
             "Authorization": f"Bearer {self.token}",
@@ -113,6 +119,8 @@ class SlackClient:
         body: dict[str, Any] = {"channel": channel, "text": text}
         if thread_ts:
             body["thread_ts"] = thread_ts
+        if blocks:
+            body["blocks"] = blocks
         r = await self._client.post(url, json=body, headers=headers)
         r.raise_for_status()
         data = r.json()

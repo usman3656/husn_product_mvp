@@ -25,12 +25,13 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from sqlalchemy import select
 
 from husn.agent.chat import run_chat_turn
-from husn.agent.llm import RateLimitedError
+from husn.agent.email_intent import extract_email, looks_like_email_request, resolve_recipients
+from husn.agent.llm import RateLimitedError, get_llm_client
 from husn.connectors.slack.client import SlackClient
 from husn.core.config import get_settings
 from husn.core.logging import log
 from husn.core.oauth import sign_token
-from husn.db.models import Connection, SlackIdentity
+from husn.db.models import Connection, PendingAction, SlackIdentity
 from husn.db.session import SessionLocal
 from husn.graph.projects import get_or_create_default_project
 from husn.graph.tenancy_context import current_tenant_id
@@ -101,12 +102,99 @@ def _format_for_slack(text: str) -> str:
     return re.sub(r"\s*\[(?:claim|artifact|finding)\s+\d+\]", "", text or "").strip()
 
 
-async def _post(conn: Connection, channel: str, text: str, thread_ts: str | None) -> None:
+async def _post(
+    conn: Connection,
+    channel: str,
+    text: str,
+    thread_ts: str | None,
+    blocks: list[dict] | None = None,
+) -> None:
     try:
         async with SlackClient(connection=conn) as sc:
-            await sc.post_message(channel=channel, text=text, thread_ts=thread_ts)
+            await sc.post_message(channel=channel, text=text, thread_ts=thread_ts, blocks=blocks)
     except Exception as e:  # noqa: BLE001 — until reinstall this is missing chat:write
         log.warning("husn.slack.events.post_failed", err=str(e)[:200])
+
+
+def _email_confirm_blocks(
+    pending_id: int, to: list[str], subject: str, body: str, unresolved: list[str]
+) -> list[dict]:
+    preview = body if len(body) <= 1500 else body[:1500] + "…"
+    txt = (
+        f"*Send this email?*\n*To:* {', '.join(to)}\n"
+        f"*Subject:* {subject or '(none)'}\n\n{preview}"
+    )
+    if unresolved:
+        txt += f"\n\n_Couldn't resolve (won't be emailed): {', '.join(unresolved)}_"
+    return [
+        {"type": "section", "text": {"type": "mrkdwn", "text": txt[:2900]}},
+        {
+            "type": "actions",
+            "elements": [
+                {"type": "button", "text": {"type": "plain_text", "text": "✅ Confirm & Send"},
+                 "style": "primary", "action_id": "confirm_email", "value": str(pending_id)},
+                {"type": "button", "text": {"type": "plain_text", "text": "Cancel"},
+                 "action_id": "cancel_email", "value": str(pending_id)},
+            ],
+        },
+    ]
+
+
+async def _propose_email(
+    session,
+    *,
+    conn: Connection,
+    channel: str,
+    thread_ts: str | None,
+    team_id: str,
+    slack_user_id: str,
+    tenant_id: int | None,
+    asked: str,
+) -> bool:
+    """Draft an email from the message and post a Confirm/Cancel card. Returns
+    True if handled (proposed or messaged the user), False if it turned out not
+    to be an email request (caller falls back to Q&A)."""
+    client = get_llm_client()
+    draft = await extract_email(asked, client=client)
+    if draft and (draft.get("_in") or draft.get("_out")):
+        await record_token_usage(
+            session, tenant_id=tenant_id, source="slack",
+            model=draft.get("_model"), input_tokens=draft.get("_in"),
+            output_tokens=draft.get("_out"),
+        )
+        await session.commit()
+    if not draft:
+        return False
+
+    emails, unresolved = await resolve_recipients(session, tenant_id=tenant_id, raw=draft["to"])
+    if not emails:
+        await _post(
+            conn, channel,
+            "I couldn't work out a valid recipient. Include an email address — "
+            "e.g. _email alice@acme.com about the launch slipping_.",
+            thread_ts,
+        )
+        return True
+
+    pa = PendingAction(
+        tenant_id=tenant_id,
+        slack_team_id=team_id,
+        slack_user_id=slack_user_id,
+        kind="send_email",
+        payload={"to": emails, "subject": draft["subject"], "body": draft["body"], "unresolved": unresolved},
+        status="pending",
+    )
+    session.add(pa)
+    await session.flush()
+    pid = pa.id
+    await session.commit()
+    await _post(
+        conn, channel,
+        f"Confirm sending this email to {', '.join(emails)}?",
+        thread_ts,
+        blocks=_email_confirm_blocks(pid, emails, draft["subject"], draft["body"], unresolved),
+    )
+    return True
 
 
 async def _dm(conn: Connection, user_id: str, text: str) -> bool:
@@ -203,6 +291,28 @@ async def _process_event(payload: dict) -> None:
                 thread_ts,
             )
             return
+
+        # Confirm-first email action: if it reads like a send-email request,
+        # draft it and post Confirm/Cancel buttons instead of answering.
+        if looks_like_email_request(asked):
+            ctx_token = current_tenant_id.set(identity.tenant_id)
+            try:
+                handled = await _propose_email(
+                    session, conn=conn, channel=channel, thread_ts=thread_ts,
+                    team_id=str(team_id), slack_user_id=str(slack_user_id),
+                    tenant_id=identity.tenant_id, asked=asked,
+                )
+            except RateLimitedError:
+                handled = True
+                await _post(conn, channel, "⏳ The model is rate-limited — try the email again shortly.", thread_ts)
+            except Exception:  # noqa: BLE001
+                log.exception("husn.slack.email.propose_failed", slack_user_id=slack_user_id)
+                handled = True
+                await _post(conn, channel, "Sorry — I couldn't draft that email. Try again.", thread_ts)
+            finally:
+                current_tenant_id.reset(ctx_token)
+            if handled:
+                return
 
         # Answer as the linked user, scoped to their tenant + default project.
         ctx_token = current_tenant_id.set(identity.tenant_id)

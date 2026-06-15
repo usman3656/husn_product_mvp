@@ -537,6 +537,25 @@ class FindingDisposition(Base):
     )
 
 
+class PendingAction(Base):
+    """A side-effecting action the Slack bot proposed and is waiting to confirm
+    (confirm-first). payload holds the action details (e.g. email to/subject/
+    body). Only the requesting Slack user can confirm, and only once."""
+
+    __tablename__ = "pending_actions"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int | None] = mapped_column(BigInteger, index=True)
+    slack_team_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    slack_user_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)  # send_email
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")  # pending|confirmed|cancelled
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class TokenUsage(Base):
     """Append-only ledger of LLM token consumption, so Settings can show daily
     usage. One row per metered LLM call. source ∈ {agent, chat, slack}."""
