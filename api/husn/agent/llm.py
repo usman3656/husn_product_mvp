@@ -26,6 +26,7 @@ import httpx
 
 from husn.core.config import get_settings
 from husn.core.logging import log
+from husn.usage import record_provider_limits
 
 
 class RateLimitedError(Exception):
@@ -88,6 +89,9 @@ async def _post_with_429_retry(
     retry_after_s: float | None = None
     for attempt in range(max_attempts):
         r = await client.post(url, json=json, headers=headers)
+        # Snapshot the provider's live rate-limit headers (real remaining quota)
+        # on every response, including 429s. Best-effort.
+        await record_provider_limits(provider, r.headers, r.status_code)
         if r.status_code != 429:
             r.raise_for_status()
             return r

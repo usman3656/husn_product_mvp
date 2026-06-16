@@ -9,10 +9,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from husn.auth.deps import AuthContext, require_member
 from husn.auth.scope import tenant_where
+from husn.core.config import get_settings
 from husn.db.models import TokenUsage
 from husn.db.session import get_session
+from husn.usage import get_provider_limits
 
 router = APIRouter(prefix="/api/usage", tags=["usage"])
+
+
+@router.get("/limits")
+async def provider_limits(
+    ctx: AuthContext = Depends(require_member),
+) -> dict[str, Any]:
+    """Live rate-limit snapshot from the LLM provider's last response headers —
+    the REAL remaining quota (vs our own token ledger). Updated on every LLM
+    call; None until the first call after deploy."""
+    provider = get_settings().llm_provider
+    return {"provider": provider, "limits": await get_provider_limits(provider)}
 
 
 @router.get("/tokens")
