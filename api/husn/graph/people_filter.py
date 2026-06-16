@@ -59,7 +59,21 @@ _SYSTEM_DOMAIN_SUFFIXES: tuple[str, ...] = (
     "e.linkedin.com",
     "accountprotection.microsoft.com",
     "email.microsoftonline.com",
+    "infomails.microsoft.com",
+    "notificationmail.microsoft.com",
 )
+
+# A domain whose FIRST label is one of these is a bulk/notification host
+# (``infomails.microsoft.com``, ``em.acme.com``, ``mailer.x.com``). Real people
+# don't receive personal mail at these — but a human's own company domain never
+# starts with one of these labels, so this stays high-precision.
+_NOTIFICATION_DOMAIN_LABELS: frozenset[str] = frozenset(
+    {"infomails", "notificationmail", "notifications", "notification",
+     "mailer", "mailers", "bounce", "bounces", "news", "newsletter", "em", "mktg"}
+)
+
+# Our own product / bot addresses — never a teammate.
+_PRODUCT_SELF_MARKERS: tuple[str, ...] = ("husn.io", "husn.ai", "husunn.ai")
 
 # A Person whose name is still the raw source id looks like this (Slack user
 # ids start U/W, bot ids start B; all upper-case + digits, 6+ chars).
@@ -80,7 +94,39 @@ def is_system_email(email: str | None) -> bool:
         return False
     if any(domain == d or domain.endswith("." + d) for d in _SYSTEM_DOMAIN_SUFFIXES):
         return True
+    if domain.split(".", 1)[0] in _NOTIFICATION_DOMAIN_LABELS:
+        return True
     return any(tok in local for tok in _SYSTEM_LOCALPART_TOKENS)
+
+
+def _alnum(s: str | None) -> str:
+    return re.sub(r"[^a-z0-9]", "", (s or "").lower())
+
+
+def is_service_account(name: str | None, email: str | None) -> bool:
+    """True for brand/service senders named after their own address.
+
+    A human's local-part rarely equals their display name (it carries dots,
+    numbers, or initials): ``Usman Ghani`` ≠ ``usman120ghani``. A service does:
+    ``Google Cloud`` == ``googlecloud@``, ``OneDrive`` == ``onedrive@``,
+    ``Microsoft`` == ``microsoft@``. We also treat a row whose name simply *is*
+    its email (never resolved to a human) as non-displayable.
+    """
+    local, _ = _localpart_domain(email)
+    if not name or not local:
+        return False
+    if name.strip().lower() == (email or "").strip().lower():
+        return True  # name is literally the address — unresolved sender
+    return _alnum(name) == _alnum(local)
+
+
+def is_product_self(name: str | None, email: str | None) -> bool:
+    """True for our own product / bot identities (husn.io / husn.ai / HusunAI)."""
+    _, domain = _localpart_domain(email)
+    if domain and any(domain == m or domain.endswith("." + m) for m in _PRODUCT_SELF_MARKERS):
+        return True
+    blob = f"{_alnum(name)} {_alnum(email)}"
+    return "husn" in blob or "husun" in blob
 
 
 def is_raw_source_id(name: str | None) -> bool:
@@ -104,7 +150,9 @@ def is_system_account(
     """
     if is_system_email(email):
         return True
-    if source == "slack" and source_user_id and source_user_id.upper().startswith("B"):
+    if source == "slack" and source_user_id and (
+        source_user_id.upper().startswith("B") or source_user_id.upper() == "USLACKBOT"
+    ):
         return True
     return False
 
@@ -114,14 +162,37 @@ def is_displayable_person(
 ) -> bool:
     """Should this Person appear on the people-facing surfaces?
 
-    Excludes robot senders and rows that never resolved past a raw source id.
+    Excludes robot senders, brand/service accounts, our own product identities,
+    and rows that never resolved past a raw source id.
     """
     if is_system_email(primary_email):
+        return False
+    if is_service_account(primary_name, primary_email):
+        return False
+    if is_product_self(primary_name, primary_email):
         return False
     # A raw-id name with no email to fall back to is not presentable as a human.
     if is_raw_source_id(primary_name) and not primary_email:
         return False
     return True
+
+
+def _person_hidden(p: dict) -> bool:
+    """Person-level filter: the name/email rules, plus bot identities (Slackbot,
+    Slack ``B…`` bots) that carry no human email of their own."""
+    if not is_displayable_person(
+        primary_name=p.get("primary_name"), primary_email=p.get("primary_email")
+    ):
+        return True
+    return any(
+        is_system_account(
+            name=None,
+            email=i.get("email"),
+            source=i.get("source"),
+            source_user_id=i.get("source_user_id"),
+        )
+        for i in p.get("identities", [])
+    )
 
 
 def _name_quality(name: str | None) -> int:
@@ -133,43 +204,70 @@ def _name_quality(name: str | None) -> int:
     return 2 + len(name)
 
 
+def _merge_into(survivor: dict, dup: dict) -> None:
+    """Fold `dup` into `survivor`: union identities, keep the better name, the
+    lowest id, and backfill a missing email."""
+    seen = {
+        (i.get("source"), i.get("source_user_id")) for i in survivor.get("identities", [])
+    }
+    for ident in dup.get("identities", []):
+        if (ident.get("source"), ident.get("source_user_id")) not in seen:
+            survivor.setdefault("identities", []).append(ident)
+    if _name_quality(dup.get("primary_name")) > _name_quality(survivor.get("primary_name")):
+        survivor["primary_name"] = dup.get("primary_name")
+    if not survivor.get("primary_email") and dup.get("primary_email"):
+        survivor["primary_email"] = dup.get("primary_email")
+    survivor["id"] = min(survivor["id"], dup["id"])
+
+
 def dedupe_and_filter(persons: Iterable[dict]) -> list[dict]:
-    """Filter system/unresolved rows, then collapse same-email duplicates.
+    """Filter non-human rows, then collapse duplicates of the same human.
 
     `persons` are the serialized dicts ``{id, primary_name, primary_email,
-    identities: [...]}`` already produced by the API. Email dedup is safe — a
-    shared (lowercased) email is the same human under the existing merge
-    heuristic — and merges each duplicate's identities into the survivor. The
-    survivor keeps the best display name and the lowest id (stable ordering).
+    identities: [...]}`` produced by the API. Two dedup passes, both safe in a
+    workspace:
+      1. **same primary_email** — a shared (lowercased) email is the same human
+         under the existing merge heuristic.
+      2. **same exact display name** — identical full names ("Lamaan Haq" ×3
+         created from sources with different/absent emails) that the email pass
+         can't reach. Exact, case/space-insensitive only — never fuzzy — so
+         distinct names like "Usman Ghani" vs "Usman Ghani Bawany" are left for
+         the admin merge tool.
+    Each merge unions identities and keeps the best name + lowest id.
     """
-    displayable = [
-        p
-        for p in persons
-        if is_displayable_person(
-            primary_name=p.get("primary_name"), primary_email=p.get("primary_email")
-        )
-    ]
+    displayable = [p for p in persons if not _person_hidden(p)]
 
+    # Pass 1 — by shared email (primary OR any identity email). A shared email
+    # is the same human, so this also reaches splits where one row's primary
+    # email is null but an identity carries the address.
     by_email: dict[str, dict] = {}
-    out: list[dict] = []
+    after_email: list[dict] = []
     for p in displayable:
-        email = (p.get("primary_email") or "").strip().lower()
-        if not email:
-            out.append(p)
-            continue
-        existing = by_email.get(email)
-        if existing is None:
-            by_email[email] = p
-            out.append(p)
-            continue
-        # Merge into the survivor: union identities, keep the better name + id.
-        seen = {
-            (i.get("source"), i.get("source_user_id")) for i in existing.get("identities", [])
+        emails = {
+            e.strip().lower()
+            for e in [p.get("primary_email"), *(i.get("email") for i in p.get("identities", []))]
+            if e and e.strip()
         }
-        for ident in p.get("identities", []):
-            if (ident.get("source"), ident.get("source_user_id")) not in seen:
-                existing.setdefault("identities", []).append(ident)
-        if _name_quality(p.get("primary_name")) > _name_quality(existing.get("primary_name")):
-            existing["primary_name"] = p.get("primary_name")
-        existing["id"] = min(existing["id"], p["id"])
+        survivor = next((by_email[e] for e in emails if e in by_email), None)
+        if survivor is None:
+            after_email.append(p)
+            for e in emails:
+                by_email[e] = p
+        else:
+            _merge_into(survivor, p)
+            for e in emails:
+                by_email.setdefault(e, survivor)
+
+    # Pass 2 — by exact normalized display name.
+    by_name: dict[str, dict] = {}
+    out: list[dict] = []
+    for p in after_email:
+        key = _alnum(p.get("primary_name"))
+        existing = by_name.get(key) if key else None
+        if existing is None:
+            if key:
+                by_name[key] = p
+            out.append(p)
+        else:
+            _merge_into(existing, p)
     return out
