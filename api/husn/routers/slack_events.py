@@ -31,6 +31,7 @@ from husn.agent.email_intent import (
     resolve_recipients,
     team_roster,
 )
+from husn.agent.finding_intent import looks_like_dealt_with, open_findings, select_finding
 from husn.agent.llm import RateLimitedError, get_llm_client
 from husn.auth.sessions import get_redis
 from husn.connectors.slack.client import SlackClient
@@ -278,6 +279,68 @@ async def _build_history(
     return hist[-10:]
 
 
+def _dealt_with_blocks(pending_id: int, summary: str) -> list[dict]:
+    return [
+        {"type": "section", "text": {"type": "mrkdwn", "text": f"*Mark this as dealt with?*\n{summary[:1500]}"}},
+        {
+            "type": "actions",
+            "elements": [
+                {"type": "button", "text": {"type": "plain_text", "text": "✅ Mark dealt with"},
+                 "style": "primary", "action_id": "confirm_dealt_with", "value": str(pending_id)},
+                {"type": "button", "text": {"type": "plain_text", "text": "Cancel"},
+                 "action_id": "cancel_dealt_with", "value": str(pending_id)},
+            ],
+        },
+    ]
+
+
+async def _propose_dealt_with(
+    session,
+    *,
+    conn: Connection,
+    channel: str,
+    thread_ts: str | None,
+    team_id: str,
+    slack_user_id: str,
+    tenant_id: int | None,
+    user_db_id: int | None,
+    asked: str,
+) -> bool:
+    """Match the request to an open issue and post a Confirm/Cancel card. Returns
+    True if handled, False if no issue clearly matched (caller falls back to Q&A)."""
+    findings = await open_findings(session, tenant_id=tenant_id)
+    if not findings:
+        await _post(conn, channel, "You have no open issues to mark as dealt with.", thread_ts)
+        return True
+
+    client = get_llm_client()
+    fid, tokens = await select_finding(asked, findings=findings, client=client)
+    if tokens.get("_in") or tokens.get("_out"):
+        await record_token_usage(
+            session, tenant_id=tenant_id, source="slack",
+            model=tokens.get("_model"), input_tokens=tokens.get("_in"), output_tokens=tokens.get("_out"),
+        )
+        await session.commit()
+    if fid is None:
+        return False
+
+    f = next(x for x in findings if x.id == fid)
+    pa = PendingAction(
+        tenant_id=tenant_id,
+        slack_team_id=team_id,
+        slack_user_id=slack_user_id,
+        kind="mark_dealt_with",
+        payload={"finding_id": fid, "summary": f.summary, "created_by": user_db_id},
+        status="pending",
+    )
+    session.add(pa)
+    await session.flush()
+    pid = pa.id
+    await session.commit()
+    await _post(conn, channel, "Mark this issue as dealt with?", thread_ts, blocks=_dealt_with_blocks(pid, f.summary))
+    return True
+
+
 async def _process_event(payload: dict) -> None:
     """Resolve the workspace's bot token; link the user or answer, with thread
     context. Loop-safe."""
@@ -374,6 +437,31 @@ async def _process_event(payload: dict) -> None:
                 reply_thread,
             )
             return
+
+        # Confirm-first "mark dealt with": match the request to an open issue
+        # and propose Confirm/Cancel instead of answering. (An email request that
+        # mentions "close the issue" stays an email — handled by the next branch.)
+        if looks_like_dealt_with(asked) and not looks_like_email_request(asked):
+            ctx_token = current_tenant_id.set(identity.tenant_id)
+            try:
+                handled = await _propose_dealt_with(
+                    session, conn=conn, channel=channel, thread_ts=reply_thread,
+                    team_id=str(team_id), slack_user_id=str(slack_user_id),
+                    tenant_id=identity.tenant_id, user_db_id=identity.user_id, asked=asked,
+                )
+            except RateLimitedError:
+                handled = True
+                await _post(conn, channel, "⏳ The model is rate-limited — try again shortly.", reply_thread)
+            except Exception:  # noqa: BLE001
+                log.exception("husn.slack.dealt_with.propose_failed", slack_user_id=slack_user_id)
+                handled = True
+                await _post(conn, channel, "Sorry — I couldn't match that to an issue. Try again.", reply_thread)
+            finally:
+                current_tenant_id.reset(ctx_token)
+            if handled:
+                if reply_thread:
+                    await _track_bot_thread(str(team_id), channel, reply_thread)
+                return
 
         # Confirm-first email action: if it reads like a send-email request,
         # draft it and post Confirm/Cancel buttons instead of answering.
