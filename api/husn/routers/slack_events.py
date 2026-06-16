@@ -27,6 +27,7 @@ from sqlalchemy import select
 from husn.agent.chat import run_chat_turn
 from husn.agent.email_intent import extract_email, looks_like_email_request, resolve_recipients
 from husn.agent.llm import RateLimitedError, get_llm_client
+from husn.auth.sessions import get_redis
 from husn.connectors.slack.client import SlackClient
 from husn.core.config import get_settings
 from husn.core.logging import log
@@ -212,24 +213,100 @@ async def _dm(conn: Connection, user_id: str, text: str) -> bool:
         return False
 
 
+def _thread_key(team_id: str, channel: str, thread_ts: str) -> str:
+    return f"slack_bot_thread:{team_id}:{channel}:{thread_ts}"
+
+
+async def _track_bot_thread(team_id: str, channel: str, thread_ts: str) -> None:
+    """Remember a thread the bot is participating in, so a plain reply in it
+    (no @mention) still gets answered. 24h TTL."""
+    try:
+        await get_redis().set(_thread_key(team_id, channel, thread_ts), "1", ex=86400)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+async def _is_bot_thread(team_id: str, channel: str, thread_ts: str) -> bool:
+    try:
+        return bool(await get_redis().get(_thread_key(team_id, channel, thread_ts)))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+async def _build_history(
+    conn: Connection,
+    *,
+    channel: str,
+    reply_thread: str | None,
+    is_dm: bool,
+    bot_user_id: str | None,
+    exclude_ts: str | None,
+) -> list[dict[str, str]]:
+    """Reconstruct recent conversation as [{role, content}] so the model keeps
+    context across turns. Thread → conversations.replies; DM →
+    conversations.history (needs im:history). Best-effort: [] on any error."""
+    try:
+        async with SlackClient(connection=conn) as sc:
+            if reply_thread:
+                resp = await sc.conversations_replies(channel=channel, ts=reply_thread, limit=30)
+                msgs = resp.get("messages") or []
+            elif is_dm:
+                resp = await sc.conversations_history(channel=channel, limit=30)
+                msgs = list(reversed(resp.get("messages") or []))
+            else:
+                return []
+    except Exception as e:  # noqa: BLE001
+        log.warning("husn.slack.history_failed", err=str(e)[:200])
+        return []
+
+    hist: list[dict[str, str]] = []
+    for m in msgs:
+        if exclude_ts and m.get("ts") == exclude_ts:
+            continue
+        if m.get("subtype"):
+            continue
+        text = _clean_text(m.get("text", ""))
+        if not text:
+            continue
+        is_bot = bool(m.get("bot_id")) or (bot_user_id is not None and m.get("user") == bot_user_id)
+        hist.append({"role": "assistant" if is_bot else "user", "content": text})
+    return hist[-10:]
+
+
 async def _process_event(payload: dict) -> None:
-    """Resolve the workspace's bot token; link the user or answer. Loop-safe."""
+    """Resolve the workspace's bot token; link the user or answer, with thread
+    context. Loop-safe."""
     event = payload.get("event") or {}
     etype = event.get("type")
     # Ignore the bot's own posts / edits / joins to avoid reply loops.
     if event.get("bot_id") or event.get("subtype"):
         return
-    if etype == "message" and event.get("channel_type") != "im":
-        return  # only DMs for `message`; channels come via app_mention
     if etype not in ("app_mention", "message"):
         return
 
     team_id = payload.get("team_id")
     channel = event.get("channel")
     slack_user_id = event.get("user")
+    ts = event.get("ts")
     if not team_id or not channel or not slack_user_id:
         return
-    thread_ts = (event.get("thread_ts") or event.get("ts")) if etype == "app_mention" else None
+
+    is_dm = etype == "message" and event.get("channel_type") == "im"
+    thread_field = event.get("thread_ts")
+    # Decide whether to engage + where to reply:
+    #  - @mention     → reply in the mention's thread (open one if needed)
+    #  - DM           → reply in the DM (no thread)
+    #  - thread reply → only if it's a thread the bot is already in, so a plain
+    #                   reply-to-reply works without re-@mentioning the bot
+    if etype == "app_mention":
+        reply_thread: str | None = thread_field or ts
+    elif is_dm:
+        reply_thread = None
+    elif thread_field and await _is_bot_thread(str(team_id), channel, thread_field):
+        reply_thread = thread_field
+    else:
+        return
+
     asked = _clean_text(event.get("text", ""))
 
     async with SessionLocal() as session:
@@ -244,6 +321,7 @@ async def _process_event(payload: dict) -> None:
         if conn is None:
             log.warning("husn.slack.events.no_connection", team_id=team_id)
             return
+        bot_user_id = (conn.extra or {}).get("bot_user_id")
 
         identity = (
             await session.execute(
@@ -268,7 +346,7 @@ async def _process_event(payload: dict) -> None:
                 "Husn login (so you only see what your account can):\n\n"
                 f"<{link}|Link your Husn account> — then message me again."
             )
-            if event.get("channel_type") == "im":
+            if is_dm:
                 # Already in the user's DM — post the link here (private).
                 await _post(conn, channel, dm_text, None)
             else:
@@ -280,7 +358,7 @@ async def _process_event(payload: dict) -> None:
                     "📬 I've sent you a DM to link your Husn account."
                     if delivered
                     else "Open a direct message with me and say hi — I'll send you a link to connect your account.",
-                    thread_ts,
+                    reply_thread,
                 )
             return
 
@@ -288,7 +366,7 @@ async def _process_event(payload: dict) -> None:
             await _post(
                 conn, channel,
                 "Ask me about your briefing — e.g. “what are the biggest risks right now?”",
-                thread_ts,
+                reply_thread,
             )
             return
 
@@ -298,28 +376,35 @@ async def _process_event(payload: dict) -> None:
             ctx_token = current_tenant_id.set(identity.tenant_id)
             try:
                 handled = await _propose_email(
-                    session, conn=conn, channel=channel, thread_ts=thread_ts,
+                    session, conn=conn, channel=channel, thread_ts=reply_thread,
                     team_id=str(team_id), slack_user_id=str(slack_user_id),
                     tenant_id=identity.tenant_id, asked=asked,
                 )
             except RateLimitedError:
                 handled = True
-                await _post(conn, channel, "⏳ The model is rate-limited — try the email again shortly.", thread_ts)
+                await _post(conn, channel, "⏳ The model is rate-limited — try the email again shortly.", reply_thread)
             except Exception:  # noqa: BLE001
                 log.exception("husn.slack.email.propose_failed", slack_user_id=slack_user_id)
                 handled = True
-                await _post(conn, channel, "Sorry — I couldn't draft that email. Try again.", thread_ts)
+                await _post(conn, channel, "Sorry — I couldn't draft that email. Try again.", reply_thread)
             finally:
                 current_tenant_id.reset(ctx_token)
             if handled:
+                if reply_thread:
+                    await _track_bot_thread(str(team_id), channel, reply_thread)
                 return
 
-        # Answer as the linked user, scoped to their tenant + default project.
+        # Answer as the linked user, scoped to their tenant + default project,
+        # with the recent thread/DM history so the model holds context.
         ctx_token = current_tenant_id.set(identity.tenant_id)
         try:
+            history = await _build_history(
+                conn, channel=channel, reply_thread=reply_thread, is_dm=is_dm,
+                bot_user_id=bot_user_id, exclude_ts=ts,
+            )
             project = await get_or_create_default_project(session, tenant_id=identity.tenant_id)
             result = await run_chat_turn(
-                session, project_id=project.id, history=[], user_message=asked
+                session, project_id=project.id, history=history, user_message=asked
             )
             reply = _format_for_slack(result.get("reply") or "…")
             await record_token_usage(
@@ -343,4 +428,6 @@ async def _process_event(payload: dict) -> None:
         finally:
             current_tenant_id.reset(ctx_token)
 
-        await _post(conn, channel, reply, thread_ts)
+        await _post(conn, channel, reply, reply_thread)
+        if reply_thread:
+            await _track_bot_thread(str(team_id), channel, reply_thread)

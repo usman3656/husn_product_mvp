@@ -84,6 +84,13 @@ class SlackClient:
             params["cursor"] = cursor
         return await self._call("users.list", params)
 
+    async def conversations_replies(
+        self, *, channel: str, ts: str, limit: int = 30
+    ) -> dict[str, Any]:
+        """A thread's messages (root + replies), oldest first. Used to rebuild
+        conversation context so the bot answers with thread memory."""
+        return await self._call("conversations.replies", {"channel": channel, "ts": ts, "limit": limit})
+
     async def open_im(self, *, user_id: str) -> str | None:
         """conversations.open — returns the DM channel id for a user. Requires
         `im:write`. Use this before DMing (more reliable than passing a user id

@@ -19,6 +19,7 @@ from husn.routers import (
     chat,
     claims,
     connections,
+    directory,
     findings,
     google_admin,
     graph,
@@ -74,6 +75,7 @@ app.include_router(auth_microsoft.router)
 app.include_router(microsoft_admin.router)
 app.include_router(auth_granola.router)
 app.include_router(connections.router)
+app.include_router(directory.router)
 app.include_router(artifacts.router)
 app.include_router(graph.router)
 app.include_router(claims.router)

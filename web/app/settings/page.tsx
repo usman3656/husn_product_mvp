@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { AccountPanel } from "@/components/account-panel";
+import { DirectoryPanel } from "@/components/directory-panel";
 import { MembersPanel } from "@/components/members-panel";
 import { PasswordPanel } from "@/components/password-panel";
 import { SyncModePanel } from "@/components/sync-mode-panel";
@@ -36,6 +37,10 @@ export default function SettingsPage() {
 
         <Group title="Members">
           <MembersPanel />
+        </Group>
+
+        <Group title="People">
+          <DirectoryPanel />
         </Group>
 
         <Group title="Integrations">

@@ -81,13 +81,25 @@ async def resolve_recipients(
         if m:
             emails.append(m.group(0))
             continue
-        q = select(Person.primary_email).where(
-            func.lower(Person.primary_name) == token.lower(),
-            Person.primary_email.isnot(None),
-        )
+        # Name → email from the directory. Try an exact (case-insensitive)
+        # match first, then a partial one ("John" → "John Smith"), preferring
+        # exact so common first names don't grab the wrong person.
+        base = select(Person.primary_email).where(Person.primary_email.isnot(None))
         if tenant_id is not None:
-            q = q.where(Person.tenant_id == tenant_id)
-        email = (await session.execute(q.limit(1))).scalar_one_or_none()
+            base = base.where(Person.tenant_id == tenant_id)
+        email = (
+            await session.execute(
+                base.where(func.lower(Person.primary_name) == token.lower()).limit(1)
+            )
+        ).scalar_one_or_none()
+        if not email:
+            email = (
+                await session.execute(
+                    base.where(Person.primary_name.ilike(f"%{token}%"))
+                    .order_by(func.length(Person.primary_name))
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
         if email:
             emails.append(email)
         else:
