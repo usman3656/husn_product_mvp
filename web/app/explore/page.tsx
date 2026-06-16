@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { RecallButton } from "@/components/recall-button";
 import { serverJson } from "@/lib/api";
 
 /* ============================================================
@@ -20,6 +21,19 @@ type Finding = {
   closed_at: string | null;
 };
 
+/* A TPM-resolved ("dealt with") issue, from /api/findings/resolved. Distinct
+   from a `closed` Finding: it's snoozed, kept, and recallable. */
+type ResolvedFinding = {
+  id: number;
+  rule_id: string;
+  severity: "low" | "medium" | "high";
+  summary: string;
+  details: { kind?: string; key?: string; distinct_values?: string[] } | null;
+  opened_at: string;
+  resolved_at: string;
+  resolved_by: string | null;
+};
+
 type Project = { id: number; slug: string; name: string; artifact_count: number; scopes: { source: string }[] };
 type Person = { id: number; primary_name: string | null; primary_email: string | null; identities: { source: string }[] };
 
@@ -34,7 +48,7 @@ const LENSES: { key: Lens; label: string; tagline: string }[] = [
   { key: "ownership", label: "Ownership", tagline: "Who is responsible — and where it isn't clear." },
   { key: "dependencies", label: "Dependencies", tagline: "What is waiting on what." },
   { key: "decisions", label: "Decisions", tagline: "What's been agreed, and where it might shift." },
-  { key: "resolved", label: "Resolved", tagline: "What used to need attention, and no longer does." },
+  { key: "resolved", label: "Resolved", tagline: "Issues you've marked as dealt with — kept here, not deleted, and recallable." },
 ];
 
 const SEV_RANK = { high: 3, medium: 2, low: 1 } as const;
@@ -49,7 +63,7 @@ function prettyKey(key?: string | null): string {
   const last = key.split("/").pop() || key;
   return last.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
 }
-function cleanTitle(f: Finding): string {
+function cleanTitle(f: { rule_id: string; summary: string; details?: { key?: string | null } | null }): string {
   const key = prettyKey(f.details?.key);
   if (f.rule_id === "R-DATE-1") return `${key} conflict`;
   if (f.rule_id === "R-STATUS-1") return `${key} drift`;
@@ -72,15 +86,16 @@ export default async function ExplorePage({ searchParams }: { searchParams: Prom
   const sp = await searchParams;
   const lens: Lens = LENSES.some((l) => l.key === sp.lens) ? (sp.lens as Lens) : "projects";
 
-  const [findingsRes, projectsRes, personsRes] = await Promise.all([
+  const [findingsRes, projectsRes, personsRes, resolvedRes] = await Promise.all([
     serverJson<{ items: Finding[] }>("/api/findings?status=all&limit=200"),
     serverJson<{ projects: Project[] }>("/api/graph/projects"),
     serverJson<{ persons: Person[] }>("/api/graph/persons?limit=200"),
+    serverJson<{ items: ResolvedFinding[] }>("/api/findings/resolved?limit=200"),
   ]);
 
   const allFindings = (findingsRes?.items ?? []);
   const open = allFindings.filter((f) => f.status === "open");
-  const closed = allFindings.filter((f) => f.status === "closed");
+  const resolved = resolvedRes?.items ?? [];
 
   return (
     <main className="mx-auto px-6 lg:px-12 pt-12 pb-32" style={{ maxWidth: 1100 }}>
@@ -115,7 +130,7 @@ export default async function ExplorePage({ searchParams }: { searchParams: Prom
         {lens === "ownership" ? <FindingsLens items={open.filter((f) => f.rule_id === "R-OWNER-1").sort(byConsequence)} hint="Where Husn can't tell who's responsible." /> : null}
         {lens === "dependencies" ? <DependenciesLens items={open.filter((f) => f.rule_id.startsWith("R-DEP-"))} /> : null}
         {lens === "decisions" ? <DecisionsLens /> : null}
-        {lens === "resolved" ? <FindingsLens items={closed.sort((a, b) => Date.parse(b.closed_at ?? "") - Date.parse(a.closed_at ?? ""))} resolved hint="Things Husn flagged that have since come back into alignment." /> : null}
+        {lens === "resolved" ? <ResolvedLens items={resolved} /> : null}
       </section>
     </main>
   );
@@ -203,15 +218,10 @@ function TeamsLens({ persons }: { persons: Person[] }) {
   );
 }
 
-/* ------- Findings lens (Risks, Ownership, Resolved) ------- */
-function FindingsLens({ items, hint, resolved }: { items: Finding[]; hint: string; resolved?: boolean }) {
+/* ------- Findings lens (Risks, Ownership, Dependencies) ------- */
+function FindingsLens({ items, hint }: { items: Finding[]; hint: string }) {
   if (items.length === 0) {
-    return (
-      <EmptyEditorial
-        title={resolved ? "Nothing has been resolved yet." : "Nothing to see here."}
-        body={hint}
-      />
-    );
+    return <EmptyEditorial title="Nothing to see here." body={hint} />;
   }
   return (
     <>
@@ -231,12 +241,61 @@ function FindingsLens({ items, hint, resolved }: { items: Finding[]; hint: strin
                   <div className="min-w-0 flex-1">
                     <p className="text-[15.5px] font-medium" style={{ color: "var(--text)" }}>{cleanTitle(f)}</p>
                     <p className="mt-1.5 text-[13px]" style={{ color: "var(--muted)" }}>
-                      {resolved ? `Resolved ${timeAgo(f.closed_at)}` : `Opened ${timeAgo(f.opened_at)}`}
+                      Opened {timeAgo(f.opened_at)}
                     </p>
                   </div>
                   <span aria-hidden className="self-center text-[14px]" style={{ color: "var(--muted)" }}>→</span>
                 </div>
               </Link>
+            </li>
+          );
+        })}
+      </ul>
+    </>
+  );
+}
+
+/* ------- Resolved lens — the TPM "dealt with" folder, with recall ------- */
+function ResolvedLens({ items }: { items: ResolvedFinding[] }) {
+  if (items.length === 0) {
+    return (
+      <EmptyEditorial
+        title="Nothing has been resolved yet."
+        body={
+          <>
+            When you mark an issue &ldquo;dealt with,&rdquo; it moves here instead of being
+            deleted — and can be recalled if it needs attention again.
+          </>
+        }
+      />
+    );
+  }
+  return (
+    <>
+      <p className="husn-prose mb-6 max-w-[58ch]">
+        Issues you marked as dealt with. They no longer count against your confidence or
+        appear in the briefing — but they&rsquo;re kept here, not deleted. Recall one to bring
+        it back as an open issue.
+      </p>
+      <ul className="space-y-2">
+        {items.map((f) => {
+          const tone = f.severity === "high" ? "conflict" : f.severity === "medium" ? "uncertain" : "understood";
+          return (
+            <li key={f.id}>
+              <div
+                className="flex items-start gap-3 rounded-[var(--radius)] border px-5 py-5"
+                style={{ borderColor: "var(--border)", background: "var(--panel)" }}
+              >
+                <ToneDot tone={tone} />
+                <Link href={`/investigations/${f.id}`} className="min-w-0 flex-1">
+                  <p className="text-[15.5px] font-medium" style={{ color: "var(--text)" }}>{cleanTitle(f)}</p>
+                  <p className="mt-1.5 text-[13px]" style={{ color: "var(--muted)" }}>
+                    Resolved {timeAgo(f.resolved_at)}
+                    {f.resolved_by ? ` · by ${f.resolved_by}` : ""}
+                  </p>
+                </Link>
+                <RecallButton findingId={f.id} size="sm" />
+              </div>
             </li>
           );
         })}
