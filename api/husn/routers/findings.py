@@ -30,9 +30,10 @@ router = APIRouter(prefix="/api/findings", tags=["findings"])
 
 def _clean_anchor(anchor: Any) -> Any:
     """Demojize the verbatim snippet inside a claim's source_anchor (Slack text
-    stored before the normalizer converted shortcodes)."""
+    stored before the normalizer converted shortcodes). loose=True because the
+    snippet window can clip a leading/trailing colon off a shortcode."""
     if isinstance(anchor, dict) and anchor.get("snippet"):
-        anchor = {**anchor, "snippet": demojize_slack(anchor["snippet"])}
+        anchor = {**anchor, "snippet": demojize_slack(anchor["snippet"], loose=True)}
     return anchor
 
 
@@ -286,7 +287,7 @@ async def get_finding(
                 "kind": claim.kind,
                 "key": claim.key,
                 "value_norm": claim.value_norm,
-                "value": demojize_slack(claim.value),
+                "value": demojize_slack(claim.value, loose=True),
                 "confidence": claim.confidence,
                 "extractor_id": claim.extractor_id,
                 "source_anchor": _clean_anchor(claim.source_anchor),

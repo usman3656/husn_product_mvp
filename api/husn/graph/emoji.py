@@ -99,11 +99,28 @@ _SHORTCODE_RE = re.compile(
 )
 
 
-def demojize_slack(text: str | None) -> str | None:
+# A "loose" pass for text where a claim's snippet window clipped one of the
+# colons — e.g. a stored evidence snippet that begins ``white_check_mark:
+# complete`` (the leading ``:`` was truncated). We only rescue KNOWN shortcodes
+# that are ≥5 chars (so short/ambiguous ones like ``x``/``+1``/``100`` never
+# match prose) and require a colon on at least one side, so ordinary words are
+# never touched.
+_LOOSE_NAMES = sorted(
+    (re.escape(k) for k in _EMOJI if len(k) >= 5 and k.isidentifier()),
+    key=len,
+    reverse=True,
+)
+_LOOSE_RE = re.compile(
+    r"(?<![\w:])(:?)(" + "|".join(_LOOSE_NAMES) + r")(:?)(?![\w])"
+)
+
+
+def demojize_slack(text: str | None, *, loose: bool = False) -> str | None:
     """Replace known Slack ``:shortcode:`` tokens with their Unicode emoji.
 
     Returns the input unchanged (including ``None``) when there's nothing to do.
-    Unknown shortcodes are preserved verbatim.
+    Unknown shortcodes are preserved verbatim. With ``loose=True`` also rescues
+    a known long shortcode missing one of its colons (for clipped snippets).
     """
     if not text or ":" not in text:
         return text
@@ -112,4 +129,15 @@ def demojize_slack(text: str | None) -> str | None:
         name = m.group(1).lower()
         return _EMOJI.get(name, m.group(0))
 
-    return _SHORTCODE_RE.sub(_sub, text)
+    text = _SHORTCODE_RE.sub(_sub, text)
+
+    if loose:
+        def _loose_sub(m: re.Match[str]) -> str:
+            # Require at least one colon so bare words are left alone.
+            if not m.group(1) and not m.group(3):
+                return m.group(0)
+            return _EMOJI.get(m.group(2).lower(), m.group(0))
+
+        text = _LOOSE_RE.sub(_loose_sub, text)
+
+    return text
