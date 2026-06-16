@@ -287,7 +287,10 @@ async def _render_and_verify(
             log.warning("husn.agent.v2.render_empty", attempt=attempts)
             continue
 
-        nli = await verify_bullets(bullets=all_bullets, skeleton=skeleton, llm=client)
+        nli = await verify_bullets(
+            bullets=all_bullets, skeleton=skeleton, llm=client,
+            session=session, tenant_id=tenant_id,
+        )
         last_nli = nli
         if nli.ok:
             return sanitised, nli, False, attempts

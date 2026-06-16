@@ -20,9 +20,12 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from husn.agent.llm import LLMClient
 from husn.agent.skeleton import Skeleton
 from husn.core.logging import log
+from husn.usage import record_token_usage
 
 
 _SYSTEM_PROMPT = (
@@ -84,6 +87,8 @@ async def verify_bullets(
     bullets: list[dict[str, Any]],
     skeleton: Skeleton,
     llm: LLMClient,
+    session: AsyncSession | None = None,
+    tenant_id: int | None = None,
 ) -> NLIResult:
     """Verify every bullet's cited claims against the skeleton's source snippets.
 
@@ -135,7 +140,10 @@ async def verify_bullets(
                 continue
 
             sentence_checks.append(
-                await _check_one(sentence=text, snippet=snippet, claim_id=cid, llm=llm)
+                await _check_one(
+                    sentence=text, snippet=snippet, claim_id=cid, llm=llm,
+                    session=session, tenant_id=tenant_id,
+                )
             )
 
         passed = all(sc.entails for sc in sentence_checks)
@@ -217,6 +225,8 @@ async def _check_one(
     snippet: str,
     claim_id: int,
     llm: LLMClient,
+    session: AsyncSession | None = None,
+    tenant_id: int | None = None,
 ) -> SentenceCheck:
     """One (sentence, snippet) → entailment yes/no via the LLM.
 
@@ -226,6 +236,12 @@ async def _check_one(
     user = f"SOURCE SNIPPET:\n{snippet}\n\nSENTENCE:\n{sentence}"
     try:
         result = await llm.complete(system=_SYSTEM_PROMPT, user=user, json_mode=True)
+        if session is not None:
+            await record_token_usage(
+                session, tenant_id=tenant_id, source="agent",
+                model=getattr(llm, "model", None),
+                input_tokens=result.input_tokens, output_tokens=result.output_tokens,
+            )
         parsed = json.loads(result.text)
         entails = bool(parsed.get("entails", False))
         reason = str(parsed.get("reason", ""))[:280]
