@@ -44,6 +44,13 @@ const I = {
       <path d="m15 9 4.5-4.5a3.18 3.18 0 0 1 4.5 4.5L19.5 13.5" transform="translate(-2 1)" />
     </svg>
   ),
+  resolved: (
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M5 4h14a1 1 0 0 1 1 1v3H4V5a1 1 0 0 1 1-1Z" />
+      <path d="M4 8h16v11a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V8Z" />
+      <path d="m9.5 13.5 2 2 3.5-3.5" />
+    </svg>
+  ),
   settings: (
     <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
       <circle cx="12" cy="12" r="3" />
@@ -57,6 +64,7 @@ const PRIMARY: NavItem[] = [
   { href: "/ask", label: "Ask Husn", icon: I.ask, shortcut: "K" },
   { href: "/explore", label: "Explore", icon: I.explore, shortcut: "E" },
   { href: "/organization", label: "Organization", icon: I.organization, shortcut: "O" },
+  { href: "/resolved", label: "Resolved", icon: I.resolved, shortcut: "R" },
 ];
 
 const PLUMBING: NavItem[] = [

@@ -17,6 +17,7 @@ from husn.connectors.slack.backfill import get_connections as slack_get_connecti
 from husn.core.config import get_settings
 from husn.core.logging import configure_logging, log
 from husn.db.session import SessionLocal
+from husn.digest import send_daily_digests
 from husn.drift.evaluate import evaluate_drift as drift_evaluate
 from husn.graph.normalize import normalize_pending as graph_normalize_pending
 
@@ -169,6 +170,18 @@ async def sync_pipeline(ctx: dict) -> dict:
     return out
 
 
+async def daily_digest(ctx: dict) -> dict:
+    """Morning admin email: each workspace's open issues (drifts + risks) sent
+    to its owners/admins. Scheduled via cron at settings.daily_digest_hour_utc.
+    No-op when DAILY_DIGEST_ENABLED=0. Idempotent enough for arq's cron, which
+    fires this once at the scheduled minute on the single worker."""
+    if not settings.daily_digest_enabled:
+        return {"ran": False, "reason": "disabled"}
+    async with SessionLocal() as session:
+        out = await send_daily_digests(session)
+    return {"ran": True, **out}
+
+
 async def auto_sync_tick(ctx: dict) -> dict:
     """Fires every minute, but only enqueues the full sync_pipeline when sync
     mode is 'automatic' AND interval_minutes have elapsed since the last run.
@@ -226,12 +239,15 @@ class WorkerSettings:
         run_agent,
         sync_pipeline,
         auto_sync_tick,
+        daily_digest,
     ]
     cron_jobs = [
-        # The only cron: check the sync setting once a minute and run the
-        # pipeline when automatic mode + interval say so. Manual "Sync now"
-        # (sync_pipeline via the API) is independent of this.
+        # Check the sync setting once a minute and run the pipeline when
+        # automatic mode + interval say so. Manual "Sync now" (sync_pipeline
+        # via the API) is independent of this.
         cron(auto_sync_tick, second={0}),
+        # Morning admin digest — once a day at the configured UTC hour.
+        cron(daily_digest, hour={settings.daily_digest_hour_utc}, minute={0}),
     ]
     on_startup = startup
     on_shutdown = shutdown

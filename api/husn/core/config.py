@@ -92,6 +92,11 @@ class Settings(BaseSettings):
     # sending (local-dev affordance).
     resend_api_key: str = ""
     resend_from: str = "Husn <login@husn.io>"
+    # Daily admin digest — a morning email to each workspace's owners/admins
+    # summarizing open issues (drifts + risks). Sent by the worker's cron at
+    # daily_digest_hour_utc (0-23). Disable per-deploy with DAILY_DIGEST_ENABLED=0.
+    daily_digest_enabled: bool = True
+    daily_digest_hour_utc: int = 7
     # Secret URL token for the Atlassian personal-data reporting endpoints.
     # Registered as part of the URL in the Atlassian dev console. Blank = check
     # disabled (dev / pre-cutover bridge).

@@ -4,12 +4,19 @@ from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import desc, func, select
+from sqlalchemy import and_, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from husn.auth.deps import AuthContext, require_member
 from husn.auth.scope import tenant_where
-from husn.db.models import Claim, ClaimGroup, Finding, FindingEvidence
+from husn.db.models import (
+    Claim,
+    ClaimGroup,
+    Finding,
+    FindingDisposition,
+    FindingEvidence,
+    User,
+)
 from husn.db.session import get_session
 from husn.drift.dispositions import (
     delete_disposition,
@@ -92,6 +99,63 @@ async def list_findings(
                 "closed_at": f.closed_at.isoformat() if f.closed_at else None,
             }
             for f in rows
+        ],
+    }
+
+
+@router.get("/resolved")
+async def list_resolved(
+    limit: int = Query(200, ge=1, le=200),
+    session: AsyncSession = Depends(get_session),
+    ctx: AuthContext = Depends(require_member),
+) -> dict[str, Any]:
+    """The Resolved folder — issues a TPM marked "dealt with".
+
+    These are snoozed (suppressed from the briefing and not counted against
+    confidence), but kept here with who resolved them and when, and can be
+    recalled. Distinct from auto-reconverged "closed" findings (Explore's
+    resolved lens), which came back into alignment on their own.
+    """
+    disp_tenant = (
+        FindingDisposition.tenant_id.is_(None)
+        if ctx.tenant_id is None
+        else FindingDisposition.tenant_id == ctx.tenant_id
+    )
+    # Inner join on the disposition: the Resolved folder is exactly the set of
+    # findings a TPM is currently suppressing. A snoozed finding whose
+    # disposition the evaluator deleted (the "materially changed → resurface"
+    # path) is no longer resolved and must not linger here.
+    stmt = (
+        select(Finding, FindingDisposition, User)
+        .join(
+            FindingDisposition,
+            and_(
+                FindingDisposition.rule_id == Finding.rule_id,
+                FindingDisposition.claim_group_id == Finding.claim_group_id,
+                disp_tenant,
+            ),
+        )
+        .outerjoin(User, User.id == FindingDisposition.created_by)
+        .where(Finding.status == "snoozed")
+        .order_by(desc(Finding.updated_at))
+        .limit(limit)
+    )
+    stmt = tenant_where(stmt, Finding, ctx)
+    rows = (await session.execute(stmt)).all()
+    return {
+        "count": len(rows),
+        "items": [
+            {
+                "id": f.id,
+                "rule_id": f.rule_id,
+                "severity": f.severity,
+                "summary": f.summary,
+                "details": f.details,
+                "opened_at": f.opened_at.isoformat(),
+                "resolved_at": disp.created_at.isoformat(),
+                "resolved_by": (user.name or user.email) if user else None,
+            }
+            for f, disp, user in rows
         ],
     }
 
