@@ -18,6 +18,7 @@ from husn.db.models import (
     RawArtifact,
 )
 from husn.db.session import get_session
+from husn.graph.people_filter import dedupe_and_filter
 
 router = APIRouter(prefix="/api/graph", tags=["graph"])
 
@@ -188,13 +189,17 @@ async def list_persons(
     session: AsyncSession = Depends(get_session),
     ctx: AuthContext = Depends(require_member),
 ) -> dict[str, Any]:
+    # Over-fetch before filtering so robot senders / unresolved-id rows don't
+    # eat into the caller's `limit`. We pull a generous window, drop the noise,
+    # collapse same-email duplicates, then trim to `limit`.
+    fetch = max(limit * 3, limit + 50)
     persons = (
         await session.execute(
-            tenant_where(select(Person).order_by(Person.id.desc()).limit(limit), Person, ctx)
+            tenant_where(select(Person).order_by(Person.id.desc()).limit(fetch), Person, ctx)
         )
     ).scalars().all()
 
-    out = []
+    raw = []
     for p in persons:
         ids = (
             await session.execute(
@@ -205,7 +210,7 @@ async def list_persons(
                 )
             )
         ).scalars().all()
-        out.append(
+        raw.append(
             {
                 "id": p.id,
                 "primary_name": p.primary_name,
@@ -221,4 +226,8 @@ async def list_persons(
                 ],
             }
         )
+
+    # Drop system/unresolved rows and merge same-email duplicates (display only;
+    # the underlying rows stay for the graph + admin merge tool).
+    out = dedupe_and_filter(raw)[:limit]
     return {"count": len(out), "persons": out}

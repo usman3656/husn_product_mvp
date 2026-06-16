@@ -3,6 +3,7 @@
 from datetime import UTC, datetime
 from typing import Any
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import asc, desc, select
@@ -10,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from husn.agent.chat import CHAT_HISTORY_TURNS, run_chat_turn
 from husn.agent.llm import RateLimitedError
+from husn.core.logging import log
 from husn.usage import record_token_usage
 from husn.auth.deps import AuthContext, require_member
 from husn.db.models import ChatMessage, ChatSession, Project
@@ -17,6 +19,20 @@ from husn.db.session import get_session
 from husn.graph.projects import get_or_create_default_project
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
+
+# User-facing copy for transient LLM failures. Never leak the provider name,
+# its URL, or a Python exception type to the chat surface.
+_RATE_LIMIT_MSG = "_The model is rate-limited right now — please try again in a moment._"
+_GENERIC_FAIL_MSG = "_Sorry — I couldn't put together an answer just now. Please try again in a moment._"
+
+
+def _is_429(exc: BaseException) -> bool:
+    """True if a raw httpx error for a 429 bubbled past the rate-limit guard."""
+    return (
+        isinstance(exc, httpx.HTTPStatusError)
+        and exc.response is not None
+        and exc.response.status_code == 429
+    )
 
 
 async def _get_owned_session(
@@ -208,23 +224,25 @@ async def send_message(
             history=history,
             user_message=body.content.strip(),
         )
-    except RateLimitedError as e:
-        # Provider quota exhausted — tell the user to retry rather than dumping
-        # a raw 502. 429 lets the client distinguish "try again" from a crash.
-        msg = "_The model is rate-limited right now — please try again in a moment._"
+    except Exception as e:
+        # Two failure modes, one clean contract: the user only ever sees a
+        # friendly sentence — never a provider name, a URL, or an exception
+        # type. The real error is logged server-side for debugging.
+        rate_limited = isinstance(e, RateLimitedError) or _is_429(e)
+        if rate_limited:
+            msg, code, detail = _RATE_LIMIT_MSG, 429, "rate-limited — please try again shortly"
+        else:
+            msg, code, detail = _GENERIC_FAIL_MSG, 502, "couldn't generate an answer — please try again"
+        log.warning(
+            "husn.chat.turn_failed",
+            session_id=session_id,
+            rate_limited=rate_limited,
+            error=f"{type(e).__name__}: {str(e)[:300]}",
+        )
+        # Persist the friendly text as the assistant turn so it shows in history.
         session.add(ChatMessage(session_id=session_id, role="assistant", content=msg))
         await session.commit()
-        raise HTTPException(429, f"{e.provider} rate-limited — try again shortly") from e
-    except Exception as e:
-        # Surface the failure as an assistant turn so the chat UX shows it
-        assistant_msg = ChatMessage(
-            session_id=session_id,
-            role="assistant",
-            content=f"_Sorry — the agent failed: {type(e).__name__}: {str(e)[:200]}_",
-        )
-        session.add(assistant_msg)
-        await session.commit()
-        raise HTTPException(502, f"agent failure: {type(e).__name__}: {str(e)[:300]}") from e
+        raise HTTPException(code, detail) from e
 
     # 4. Persist assistant turn with citations
     assistant_msg = ChatMessage(

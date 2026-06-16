@@ -22,6 +22,7 @@ from husn.db.models import (
     RawArtifact,
 )
 from husn.db.session import get_session
+from husn.graph.emoji import demojize_slack
 
 router = APIRouter(prefix="/api/connections", tags=["connections"])
 
@@ -217,6 +218,48 @@ async def reset_sync(
     }
 
 
+# Humanized fallback labels per (source, kind) when there's no title/body to
+# show — anything but the raw external id (``T…:message:C…:1781552448.5``).
+_KIND_LABELS = {
+    ("slack", "message"): "Slack message",
+    ("slack", "channel"): "Slack channel",
+    ("slack", "user"): "Slack profile",
+    ("jira", "issue"): "Jira issue",
+    ("google", "gmail"): "Email",
+    ("microsoft", "outlook"): "Email",
+}
+
+
+def _file_label(r: Any, source: str) -> str:
+    """Human-readable label for a connection's file row.
+
+    Prefers the normalized Artifact.title; for older Slack messages whose title
+    predates the normalizer change it reconstructs ``#channel: text…`` from
+    body/extra; otherwise a "<Source> <kind>" label. Never the raw external id.
+    """
+    title = getattr(r, "title", None)
+    if title:
+        return title
+    body = getattr(r, "body", None)
+    extra = getattr(r, "extra", None) or {}
+    if body or extra.get("channel_name"):
+        chan = extra.get("channel_name")
+        snippet = " ".join((demojize_slack(body) or "").split())
+        if len(snippet) > 80:
+            snippet = snippet[:79].rstrip() + "…"
+        chan_label = f"#{chan}" if chan else None
+        if chan_label and snippet:
+            return f"{chan_label}: {snippet}"
+        if chan_label or snippet:
+            return chan_label or snippet
+    labelled = _KIND_LABELS.get((source, r.kind))
+    if labelled:
+        return labelled
+    if r.kind:
+        return f"{source.title()} {r.kind.replace('_', ' ')}".strip()
+    return r.external_id
+
+
 @router.get("/{connection_id}/files")
 async def list_connection_files(
     connection_id: int,
@@ -248,6 +291,8 @@ async def list_connection_files(
             RawArtifact.fetched_at,
             Artifact.id.label("artifact_id"),
             Artifact.title,
+            Artifact.body,
+            Artifact.extra,
             Artifact.url,
             Artifact.normalized_at,
             Artifact.status,
@@ -285,7 +330,7 @@ async def list_connection_files(
             "raw_id": r.id,
             "kind": r.kind,
             "external_id": r.external_id,
-            "title": r.title or r.external_id,
+            "title": _file_label(r, conn.source),
             "url": r.url,
             "fetched_at": r.fetched_at.isoformat() if r.fetched_at else None,
             "normalized_at": r.normalized_at.isoformat() if r.normalized_at else None,

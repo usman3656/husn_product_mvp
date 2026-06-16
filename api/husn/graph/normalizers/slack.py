@@ -6,10 +6,28 @@ from datetime import UTC, datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from husn.db.models import Artifact, ArtifactMention, RawArtifact
+from husn.graph.emoji import demojize_slack
 from husn.graph.identity import resolve_or_create_person
 from husn.graph.projects import resolve_project_for
 
 _USER_MENTION_RE = re.compile(r"<@([UW][A-Z0-9]+)>")
+
+
+def _message_title(channel_name: str | None, text: str) -> str | None:
+    """A human-readable label for a Slack message artifact.
+
+    Slack messages have no native title, so the connections file list used to
+    fall back to the raw external id (``T…:message:C…:1781552448.5``). Build a
+    ``#channel: first line of text…`` label instead. Returns None only when we
+    have neither a channel nor any text to show.
+    """
+    snippet = " ".join((text or "").split())  # collapse newlines/runs of space
+    if len(snippet) > 80:
+        snippet = snippet[:79].rstrip() + "…"
+    chan = f"#{channel_name}" if channel_name else None
+    if chan and snippet:
+        return f"{chan}: {snippet}"
+    return chan or snippet or None
 
 
 def _slack_ts_to_dt(ts: str | None) -> datetime | None:
@@ -31,7 +49,10 @@ async def normalize_slack_message(session: AsyncSession, raw: RawArtifact) -> Ar
         session, source="slack", scope_kind="channel", scope_id=channel_id or ""
     )
 
-    text = payload.get("text") or ""
+    # Convert Slack emoji shortcodes (:white_check_mark:) to Unicode once, here,
+    # so every downstream consumer (claims, drift evidence, briefs) gets clean
+    # text instead of bare :shortcode: tokens.
+    text = demojize_slack(payload.get("text") or "") or ""
 
     author_person_id: int | None = None
     author_user_id = payload.get("user") or payload.get("bot_id")
@@ -50,7 +71,7 @@ async def normalize_slack_message(session: AsyncSession, raw: RawArtifact) -> Ar
         source="slack",
         kind="message",
         external_id=raw.external_id,
-        title=None,
+        title=_message_title(channel_name, text),
         body=text,
         author_person_id=author_person_id,
         occurred_at=_slack_ts_to_dt(payload.get("ts")),

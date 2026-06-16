@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { EvidenceChip, LoadingState, OfflineState, Pill } from "@/components/ui";
 import { clientFetch } from "@/lib/api";
+import { describeError } from "@/lib/chat";
 
 type SessionSummary = {
   id: number;
@@ -140,16 +141,21 @@ export function ChatRoom() {
           body: JSON.stringify({ content: text }),
         },
       );
-      if (!r.ok) {
-        const body = await r.text();
-        throw new Error(body.slice(0, 200));
-      }
+      // On failure the server persists a friendly assistant turn; parse the
+      // clean detail, then refetch so that bubble shows. Banner only if no
+      // assistant reply landed.
+      const errMsg = r.ok ? null : await describeError(r);
       // Re-fetch to get the real ids for both user + assistant turns
       const list = await (
         await clientFetch(`/api/chat/sessions/${currentId}/messages`)
       ).json();
       setMessages(list.items);
       await refreshSessions();
+      const lastIsAssistant =
+        Array.isArray(list.items) &&
+        list.items.length > 0 &&
+        list.items[list.items.length - 1].role === "assistant";
+      if (errMsg && !lastIsAssistant) setError(errMsg);
     } catch (e) {
       setError(e instanceof Error ? e.message : "send failed");
       // Roll back the optimistic message

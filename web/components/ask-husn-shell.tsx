@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { clientFetch } from "@/lib/api";
 import { CitedText } from "@/components/cited-text";
-import { type ChatMessage as Message, type SessionSummary } from "@/lib/chat";
+import { describeError, type ChatMessage as Message, type SessionSummary } from "@/lib/chat";
 
 const SUGGESTIONS: { label: string; q: string }[] = [
   { label: "What changed this week?", q: "What changed this week across the program?" },
@@ -110,10 +110,19 @@ export function AskHusnShell() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ content: text }),
       });
-      if (!r.ok) throw new Error((await r.text()).slice(0, 200));
+      // On failure the server still persists a friendly assistant turn (e.g.
+      // the rate-limit notice). Parse the clean detail BEFORE refetching, then
+      // refresh the thread so that assistant bubble shows. Only surface the
+      // banner if the refresh didn't produce an assistant reply.
+      const errMsg = r.ok ? null : await describeError(r);
       const list = await (await clientFetch(`/api/chat/sessions/${currentId}/messages`)).json();
       setMessages(list.items);
       await refreshSessions();
+      const lastIsAssistant =
+        Array.isArray(list.items) &&
+        list.items.length > 0 &&
+        list.items[list.items.length - 1].role === "assistant";
+      if (errMsg && !lastIsAssistant) setError(errMsg);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Send failed");
       setMessages((prev) => prev.filter((m) => m.id !== optimistic.id));

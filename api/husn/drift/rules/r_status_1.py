@@ -64,14 +64,36 @@ class RStatus1:
 
         worst_claims = [c for c in primary_claims if _norm(c) in _WORST]
         best_claims = [c for c in primary_claims if _norm(c) in _BEST]
-        worst = worst_claims[0]
-        best = best_claims[0]
-        a_source = art_by_id[worst.source_artifact_id].source
-        b_source = art_by_id[best.source_artifact_id].source
-        summary = (
-            f"Status drift in {group.kind}/{group.key}: "
-            f"marked {worst.value_norm} in {a_source} but {best.value_norm} in {b_source}."
+
+        def _src(claim: Claim) -> str:
+            return art_by_id[claim.source_artifact_id].source
+
+        # Prefer a worst/best pair from DIFFERENT sources so the summary names
+        # two distinct sources ("blocked in slack but on-track in jira"). A
+        # single source can legitimately carry both a worst and a best claim
+        # (two Slack messages), and picking [0] from each blindly produced
+        # "marked blocked in slack but on-track in slack".
+        worst, best = worst_claims[0], best_claims[0]
+        cross = next(
+            ((w, b) for w in worst_claims for b in best_claims if _src(w) != _src(b)),
+            None,
         )
+        if cross is not None:
+            worst, best = cross
+
+        a_source = _src(worst)
+        b_source = _src(best)
+        if a_source == b_source:
+            # Genuine intra-source disagreement — don't repeat the source name.
+            summary = (
+                f"Status drift in {group.kind}/{group.key}: "
+                f"marked {worst.value_norm} and {best.value_norm} in {a_source}."
+            )
+        else:
+            summary = (
+                f"Status drift in {group.kind}/{group.key}: "
+                f"marked {worst.value_norm} in {a_source} but {best.value_norm} in {b_source}."
+            )
 
         per_source: dict[str, list[dict[str, Any]]] = {}
         for claim in primary_claims:

@@ -23,8 +23,17 @@ from husn.drift.dispositions import (
     upsert_disposition,
     value_signature,
 )
+from husn.graph.emoji import demojize_slack
 
 router = APIRouter(prefix="/api/findings", tags=["findings"])
+
+
+def _clean_anchor(anchor: Any) -> Any:
+    """Demojize the verbatim snippet inside a claim's source_anchor (Slack text
+    stored before the normalizer converted shortcodes)."""
+    if isinstance(anchor, dict) and anchor.get("snippet"):
+        anchor = {**anchor, "snippet": demojize_slack(anchor["snippet"])}
+    return anchor
 
 
 @router.get("/summary")
@@ -93,7 +102,7 @@ async def list_findings(
                 "rule_id": f.rule_id,
                 "status": f.status,
                 "severity": f.severity,
-                "summary": f.summary,
+                "summary": demojize_slack(f.summary),
                 "details": f.details,
                 "opened_at": f.opened_at.isoformat(),
                 "closed_at": f.closed_at.isoformat() if f.closed_at else None,
@@ -149,7 +158,7 @@ async def list_resolved(
                 "id": f.id,
                 "rule_id": f.rule_id,
                 "severity": f.severity,
-                "summary": f.summary,
+                "summary": demojize_slack(f.summary),
                 "details": f.details,
                 "opened_at": f.opened_at.isoformat(),
                 "resolved_at": disp.created_at.isoformat(),
@@ -261,7 +270,7 @@ async def get_finding(
         "rule_id": f.rule_id,
         "status": f.status,
         "severity": f.severity,
-        "summary": f.summary,
+        "summary": demojize_slack(f.summary),
         "details": f.details,
         "opened_at": f.opened_at.isoformat(),
         "closed_at": f.closed_at.isoformat() if f.closed_at else None,
@@ -277,10 +286,10 @@ async def get_finding(
                 "kind": claim.kind,
                 "key": claim.key,
                 "value_norm": claim.value_norm,
-                "value": claim.value,
+                "value": demojize_slack(claim.value),
                 "confidence": claim.confidence,
                 "extractor_id": claim.extractor_id,
-                "source_anchor": claim.source_anchor,
+                "source_anchor": _clean_anchor(claim.source_anchor),
             }
             for claim, ev in evidence_rows
         ],

@@ -9,6 +9,22 @@
 
 import { clientFetch } from "@/lib/api";
 
+/** Turn a failed Response into a clean, human sentence.
+ *
+ * The API returns FastAPI's {"detail": "..."} on error (already user-safe — it
+ * never contains a provider URL or exception type). Parse that; fall back to a
+ * generic line so we never render a raw JSON blob or stack string in the UI. */
+export async function describeError(r: Response): Promise<string> {
+  try {
+    const body = (await r.json()) as { detail?: unknown };
+    if (body?.detail) return String(body.detail);
+  } catch {
+    /* non-JSON body — fall through */
+  }
+  if (r.status === 429) return "Rate-limited right now — please try again in a moment.";
+  return "Something went wrong — please try again.";
+}
+
 export type SessionSummary = {
   id: number;
   project_id: number | null;
