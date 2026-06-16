@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from husn.agent.llm import parse_json_response
 from husn.core.logging import log
-from husn.db.models import Person
+from husn.db.models import DirectoryContact
 
 _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
 _TRIGGER_RE = re.compile(
@@ -70,7 +70,7 @@ async def resolve_recipients(
 ) -> tuple[list[str], list[str]]:
     """Split raw recipients into resolved email addresses + unresolved names.
     Literal emails pass through; names are matched (case-insensitive) against
-    the tenant's person directory's primary_email."""
+    the curated team directory (DirectoryContact)."""
     emails: list[str] = []
     unresolved: list[str] = []
     for token in raw:
@@ -81,22 +81,21 @@ async def resolve_recipients(
         if m:
             emails.append(m.group(0))
             continue
-        # Name → email from the directory. Try an exact (case-insensitive)
-        # match first, then a partial one ("John" → "John Smith"), preferring
-        # exact so common first names don't grab the wrong person.
-        base = select(Person.primary_email).where(Person.primary_email.isnot(None))
+        # Name → email from the CURATED team directory. Exact (case-insensitive)
+        # match first, then partial ("John" → "John Smith", shortest name wins).
+        base = select(DirectoryContact.email).where(DirectoryContact.email.isnot(None))
         if tenant_id is not None:
-            base = base.where(Person.tenant_id == tenant_id)
+            base = base.where(DirectoryContact.tenant_id == tenant_id)
         email = (
             await session.execute(
-                base.where(func.lower(Person.primary_name) == token.lower()).limit(1)
+                base.where(func.lower(DirectoryContact.name) == token.lower()).limit(1)
             )
         ).scalar_one_or_none()
         if not email:
             email = (
                 await session.execute(
-                    base.where(Person.primary_name.ilike(f"%{token}%"))
-                    .order_by(func.length(Person.primary_name))
+                    base.where(DirectoryContact.name.ilike(f"%{token}%"))
+                    .order_by(func.length(DirectoryContact.name))
                     .limit(1)
                 )
             ).scalar_one_or_none()
@@ -112,3 +111,15 @@ async def resolve_recipients(
             seen.add(e.lower())
             deduped.append(e)
     return deduped, unresolved
+
+
+async def team_roster(session: AsyncSession, *, tenant_id: int | None, limit: int = 60) -> str:
+    """A compact 'name <email>' roster of the curated directory, to inject into
+    the bot's context so it knows the team's emails. Empty string if none."""
+    q = select(DirectoryContact.name, DirectoryContact.email).where(
+        DirectoryContact.email.isnot(None)
+    )
+    if tenant_id is not None:
+        q = q.where(DirectoryContact.tenant_id == tenant_id)
+    rows = (await session.execute(q.order_by(DirectoryContact.name).limit(limit))).all()
+    return "; ".join(f"{n} <{e}>" for n, e in rows)

@@ -537,6 +537,24 @@ class FindingDisposition(Base):
     )
 
 
+class DirectoryContact(Base):
+    """The curated team directory the admin manages (add/edit/delete). This is
+    what the Slack bot resolves email recipients against — NOT the auto-built
+    `persons` table (which contains everyone who ever appeared in ingested
+    data). Seeded from workspace members on demand."""
+
+    __tablename__ = "directory_contacts"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int | None] = mapped_column(BigInteger, index=True)
+    name: Mapped[str] = mapped_column(String(256), nullable=False)
+    email: Mapped[str | None] = mapped_column(String(320))
+    slack_user_id: Mapped[str | None] = mapped_column(String(32))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class PendingAction(Base):
     """A side-effecting action the Slack bot proposed and is waiting to confirm
     (confirm-first). payload holds the action details (e.g. email to/subject/

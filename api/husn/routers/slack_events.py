@@ -25,7 +25,12 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from sqlalchemy import select
 
 from husn.agent.chat import run_chat_turn
-from husn.agent.email_intent import extract_email, looks_like_email_request, resolve_recipients
+from husn.agent.email_intent import (
+    extract_email,
+    looks_like_email_request,
+    resolve_recipients,
+    team_roster,
+)
 from husn.agent.llm import RateLimitedError, get_llm_client
 from husn.auth.sessions import get_redis
 from husn.connectors.slack.client import SlackClient
@@ -403,8 +408,14 @@ async def _process_event(payload: dict) -> None:
                 bot_user_id=bot_user_id, exclude_ts=ts,
             )
             project = await get_or_create_default_project(session, tenant_id=identity.tenant_id)
+            roster = await team_roster(session, tenant_id=identity.tenant_id)
+            user_msg = (
+                f"{asked}\n\n[Team directory — names → emails you may reference: {roster}]"
+                if roster
+                else asked
+            )
             result = await run_chat_turn(
-                session, project_id=project.id, history=history, user_message=asked
+                session, project_id=project.id, history=history, user_message=user_msg
             )
             reply = _format_for_slack(result.get("reply") or "…")
             await record_token_usage(
