@@ -34,12 +34,21 @@ _EXTRACT_SYSTEM = (
     'CONTEXT. Return ONLY JSON {"to": ["email or name", ...], "subject": "...", '
     '"body": "..."}.\n'
     "- to: each recipient as an email address if present, else the person's name.\n"
-    "- subject: a SPECIFIC subject about the actual topic — never 'Message from "
+    "- subject: a SPECIFIC subject about the actual topic. Never 'Message from "
     "User' or similar.\n"
     "- body: a complete, specific email about WHAT THE USER IS REFERRING TO. When "
     "they say 'this', 'the issue', 'it', 'that', resolve it from the conversation "
     "and include the real details (names, dates, issue ids, the actual situation). "
     "NEVER write generic filler like 'you have been asked to receive an email'.\n"
+    "FORMAT the body like a normal email a person would send:\n"
+    "  * Start with a short greeting line (e.g. 'Hi Usman,').\n"
+    "  * Use real line breaks: put a blank line between paragraphs, and put each "
+    "list item on its own line starting with '- '.\n"
+    "  * Sign off as Husn (e.g. end with 'Best,' on one line then 'Husn' on the "
+    "next). NEVER sign as 'AI Assistant', '[AI Assistant]', or any bracketed "
+    "placeholder.\n"
+    "  * Do NOT use em dashes or en dashes (— –). Use commas, periods, or simple "
+    "hyphens.\n"
     'If it is not actually an email request, return {"to": [], "subject": "", '
     '"body": ""}.'
 )
@@ -75,10 +84,15 @@ async def extract_email(
     to = data.get("to")
     if not isinstance(to, list) or not to:
         return None
+
+    def _clean(s: Any) -> str:
+        # Guarantee no em/en dashes even if the model ignores the instruction.
+        return str(s or "").replace("—", "-").replace("–", "-")
+
     return {
         "to": [str(t) for t in to],
-        "subject": str(data.get("subject") or ""),
-        "body": str(data.get("body") or ""),
+        "subject": _clean(data.get("subject")),
+        "body": _clean(data.get("body")),
         "_in": result.input_tokens,
         "_out": result.output_tokens,
         "_model": getattr(client, "model", None),

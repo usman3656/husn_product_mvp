@@ -17,11 +17,12 @@ _RESEND_URL = "https://api.resend.com/emails"
 
 
 def _text_to_html(body: str) -> str:
+    # Left-aligned, full-width like a normal email (no centered max-width block).
     safe = escape(body).replace("\n", "<br>")
     return (
         '<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;'
-        'max-width:560px;margin:0 auto;padding:24px 16px;font-size:14px;'
-        f'color:#27272a;line-height:1.6;">{safe}</div>'
+        'font-size:14px;color:#1f2328;line-height:1.6;text-align:left;">'
+        f"{safe}</div>"
     )
 
 
