@@ -4,7 +4,6 @@ import { BriefingCarousel, type CarouselSlide } from "@/components/briefing-caro
 import { DealtWithButton } from "@/components/dealt-with-button";
 import { Pulse as PulseStrip, type PulseDatum } from "@/components/pulse";
 import { ReachOutButton, type ReachOutContext } from "@/components/reach-out";
-import { SyncNowButton } from "@/components/sync-now-button";
 import { serverJson, type Me } from "@/lib/api";
 
 /* ============================================================
@@ -268,16 +267,30 @@ export default async function Briefing() {
   // The briefing is presented as a deck: each section fills the stage and you
   // advance through them. Sections are rendered server-side and handed to the
   // client carousel as slide nodes (data + derivations stay here).
+  const heroTone = top?.severity === "high" ? "var(--conflict)" : top ? "var(--uncertain)" : "var(--aligned)";
   const slides: CarouselSlide[] = [
     {
-      id: "pulse",
+      id: "briefing",
       kicker: "01",
-      title: "Organizational Pulse",
+      title: "Today's briefing",
+      watermark: "Briefing",
+      tone: "var(--accent)",
+      summary: "The day's picture — confidence, alignment, momentum and risk.",
       node: (
         <div>
-          <p className="husn-prose max-w-[68ch] mb-7" style={{ fontSize: 16 }}>
+          <p className="husn-prose max-w-[68ch]" style={{ fontSize: 16.5 }}>
             {leadIn(findings.length, conf)}
           </p>
+          <div className="mt-6">
+            <Link
+              href="/connections"
+              className="inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-[13.5px] font-semibold"
+              style={{ background: "var(--text)", color: "var(--bg)" }}
+            >
+              Open connections →
+            </Link>
+          </div>
+          <p className="husn-eyebrow mt-9 mb-3">Organizational Pulse</p>
           <PulseStrip data={pulseData(findings, conf, alig, mom, risks)} />
         </div>
       ),
@@ -286,30 +299,45 @@ export default async function Briefing() {
       id: "consequential",
       kicker: "02",
       title: "Most Consequential",
+      watermark: "Issue",
+      tone: heroTone,
+      summary: "The single issue costing you the most right now.",
       node: top ? <ConsequentialIssue f={top} /> : <AllClear />,
     },
     {
       id: "risks",
       kicker: "03",
       title: "Emerging Risks",
+      watermark: "Risks",
+      tone: risks.length ? "var(--conflict)" : "var(--aligned)",
+      summary: "What surfaced in the last 48 hours.",
       node: <RiskList items={risks} />,
     },
     {
       id: "missing",
       kicker: "04",
       title: "Missing Information",
+      watermark: "Gaps",
+      tone: "var(--predicted)",
+      summary: "Owners and context Husn still needs to brief you well.",
       node: <MissingList items={missing} />,
     },
     {
       id: "actions",
       kicker: "05",
       title: "Recommended Actions",
+      watermark: "Actions",
+      tone: "var(--accent)",
+      summary: "The next moves, drafted and ready to send.",
       node: <RecommendedActions findings={findings} />,
     },
     {
       id: "projects",
       kicker: "06",
       title: "Active Projects",
+      watermark: "Work",
+      tone: "var(--aligned)",
+      summary: "Active workstreams and where each one stands.",
       node: <ActiveProjects projects={projects} findings={findings} />,
     },
   ];
@@ -345,7 +373,15 @@ function BriefingAwaiting({ isAdmin = false }: { isAdmin?: boolean }) {
           Connect a tool and Husn will start reading. Your first briefing
           builds within about an hour of the first sync.
         </p>
-        <SyncNowButton isAdmin={isAdmin} />
+        <div className="mt-7">
+          <Link
+            href="/connections"
+            className="inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-[14px] font-semibold"
+            style={{ background: "var(--text)", color: "var(--bg)" }}
+          >
+            Open connections →
+          </Link>
+        </div>
       </header>
 
       <section className="mt-14 husn-rise" style={{ animationDelay: "40ms" }}>

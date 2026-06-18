@@ -379,9 +379,18 @@ details > summary::-webkit-details-marker { display: none; }
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background:
-    radial-gradient(125% 85% at 82% -12%, color-mix(in srgb, var(--accent) 5%, var(--bg)), var(--bg) 55%);
+  background: var(--bg);
 }
+/* Per-section colour wash behind everything; cross-fades on slide change. */
+.brf-wash { position: absolute; inset: 0; z-index: 0; pointer-events: none; opacity: 0; animation: brf-washin 700ms ease forwards; }
+@keyframes brf-washin { to { opacity: 1; } }
+/* Autoplay timer line across the top of the stage. */
+.brf-autobar { position: absolute; top: 0; left: 0; height: 2px; width: 0; background: var(--accent); z-index: 6; box-shadow: 0 0 8px var(--accent); }
+@media (prefers-reduced-motion: no-preference) {
+  .brf-autobar { animation: brf-auto 7000ms linear forwards; }
+  @keyframes brf-auto { from { width: 0; } to { width: 100%; } }
+}
+.brf-top, .brf-center, .brf-bottom, .brf-overview { position: relative; z-index: 1; }
 .brf-top {
   display: flex; align-items: center; gap: 16px;
   padding: 18px clamp(16px, 4vw, 48px) 10px;
@@ -398,10 +407,13 @@ details > summary::-webkit-details-marker { display: none; }
 .brf-seg-fill { position: absolute; inset: 0; transform-origin: left; transform: scaleX(0); border-radius: 999px; background: var(--accent); transition: transform .5s cubic-bezier(.2,.7,.2,1), background .3s; }
 .brf-seg[data-state="past"] .brf-seg-fill { transform: scaleX(1); background: var(--border-strong); }
 .brf-seg[data-state="on"]   .brf-seg-fill { transform: scaleX(1); background: var(--accent); }
-.brf-topright { display: flex; align-items: center; gap: 14px; margin-left: auto; }
+.brf-topright { display: flex; align-items: center; gap: 10px; margin-left: auto; }
 .brf-count { font-size: 12px; color: var(--muted); letter-spacing: .04em; }
-.brf-toggle { font-size: 12px; color: var(--muted); border: 1px solid var(--border); background: var(--panel); border-radius: 999px; padding: 5px 11px; cursor: pointer; }
+.brf-toggle { font-size: 12px; color: var(--muted); border: 1px solid var(--border); background: var(--panel); border-radius: 999px; padding: 5px 11px; cursor: pointer; text-decoration: none; }
 .brf-toggle:hover { color: var(--text); border-color: var(--border-strong); }
+.brf-ctl { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 999px; border: 1px solid var(--border); background: var(--panel); color: var(--muted); cursor: pointer; }
+.brf-ctl:hover { color: var(--text); border-color: var(--border-strong); }
+.brf-ctl[aria-pressed="true"] { color: var(--accent-ink); background: var(--accent-soft); border-color: var(--accent-line, var(--border-strong)); }
 
 .brf-center {
   flex: 1 1 auto; overflow-y: auto; overflow-x: hidden;
@@ -420,10 +432,11 @@ details > summary::-webkit-details-marker { display: none; }
   min-height: min(70vh, 640px); display: flex; flex-direction: column;
 }
 .brf-watermark {
-  position: absolute; right: -0.5vw; bottom: -7vh; z-index: 0;
-  font-size: min(44vh, 400px); font-weight: 800; line-height: .8;
-  letter-spacing: -0.05em; color: var(--text); opacity: 0.04;
-  pointer-events: none; user-select: none;
+  position: absolute; right: -0.5vw; bottom: -5vh; z-index: 0; max-width: 70%;
+  font-size: min(30vh, 260px); font-weight: 800; line-height: .82;
+  letter-spacing: -0.04em; text-transform: uppercase; text-align: right;
+  color: var(--text); opacity: 0.045; pointer-events: none; user-select: none;
+  white-space: nowrap; overflow: visible;
 }
 .brf-slidehead {
   position: relative; z-index: 1; display: flex; align-items: baseline; gap: 16px;
@@ -460,16 +473,38 @@ details > summary::-webkit-details-marker { display: none; }
 .brf-mnav:disabled { opacity: .35; pointer-events: none; }
 
 @media (prefers-reduced-motion: no-preference) {
-  /* Camera zoom: advancing zooms in, going back zooms out. The header and body
-     then rise in with a slight stagger so the scene composes itself. */
-  .brf-slide { animation: brf-zin 580ms cubic-bezier(.22, .61, .21, 1) both; }
+  /* Camera zoom: advancing dives in, going back pulls out, with a brief
+     focus-pull blur. The header + body then rise in on a slight stagger. */
+  .brf-slide { animation: brf-zin 620ms cubic-bezier(.2, .62, .2, 1) both; transform-origin: 50% 46%; }
   .brf-slide[data-dir="-1"] { animation-name: brf-zout; }
-  @keyframes brf-zin  { from { opacity: 0; transform: scale(.93); } to { opacity: 1; transform: scale(1); } }
-  @keyframes brf-zout { from { opacity: 0; transform: scale(1.07); } to { opacity: 1; transform: scale(1); } }
-  .brf-slidehead { animation: brf-rise-up 520ms cubic-bezier(.2, .7, .2, 1) both; }
-  .brf-body { animation: brf-rise-up 660ms cubic-bezier(.2, .7, .2, 1) 110ms both; }
-  @keyframes brf-rise-up { from { opacity: 0; transform: translateY(13px); } to { opacity: 1; transform: none; } }
+  @keyframes brf-zin  { from { opacity: 0; transform: scale(.88); filter: blur(7px); } 55% { filter: blur(0); } to { opacity: 1; transform: scale(1); filter: none; } }
+  @keyframes brf-zout { from { opacity: 0; transform: scale(1.12); filter: blur(7px); } 55% { filter: blur(0); } to { opacity: 1; transform: scale(1); filter: none; } }
+  .brf-slidehead { animation: brf-rise-up 560ms cubic-bezier(.2, .7, .2, 1) 60ms both; }
+  .brf-body { animation: brf-rise-up 680ms cubic-bezier(.2, .7, .2, 1) 150ms both; }
+  @keyframes brf-rise-up { from { opacity: 0; transform: translateY(15px); } to { opacity: 1; transform: none; } }
+  /* Overview grid zooms out into view. */
+  .brf-grid { animation: brf-ovin 420ms cubic-bezier(.2, .7, .2, 1) both; }
+  @keyframes brf-ovin { from { opacity: 0; transform: scale(1.04); } to { opacity: 1; transform: scale(1); } }
 }
+
+/* ---- Overview grid ---- */
+.brf-overview { flex: 1 1 auto; overflow-y: auto; padding: 4px clamp(16px, 5vw, 72px) 48px; }
+.brf-ovbar { width: 100%; max-width: 1180px; margin: 0 auto 18px; display: flex; align-items: center; justify-content: space-between; }
+.brf-grid { width: 100%; max-width: 1180px; margin: 0 auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(244px, 1fr)); gap: 16px; }
+.brf-ocard {
+  position: relative; overflow: hidden; text-align: left; cursor: pointer;
+  min-height: 168px; padding: 22px 24px; border-radius: var(--radius-lg);
+  border: 1px solid var(--border); background: var(--panel);
+  display: flex; flex-direction: column;
+  transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+}
+.brf-ocard:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); border-color: var(--border-strong); }
+.brf-ocard[aria-current="true"] { border-color: var(--brf-otone); box-shadow: 0 0 0 1px var(--brf-otone) inset; }
+.brf-ocard-accent { position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--brf-otone); }
+.brf-owm { position: absolute; right: -2px; bottom: -22px; font-size: 120px; font-weight: 800; line-height: .8; color: var(--text); opacity: 0.045; pointer-events: none; }
+.brf-ocard-kicker { font-size: 12px; font-weight: 700; letter-spacing: .14em; }
+.brf-ocard-title { margin-top: 8px; font-size: 19px; font-weight: 600; letter-spacing: -0.01em; color: var(--text); position: relative; z-index: 1; }
+.brf-ocard-sum { margin-top: 8px; font-size: 13px; line-height: 1.5; color: var(--muted); position: relative; z-index: 1; max-width: 30ch; }
 
 @media (max-width: 980px) { .brf-dot-hide { display: none; } }
 
