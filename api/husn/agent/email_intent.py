@@ -30,15 +30,18 @@ _TRIGGER_RE = re.compile(
 )
 
 _EXTRACT_SYSTEM = (
-    "You extract an email-send request from a message. Return ONLY JSON of the "
-    'form {"to": ["email or name", ...], "subject": "...", "body": "..."}.\n'
-    "- to: each recipient as an email address if the message contains one, else "
-    "the person's name.\n"
-    "- subject: a concise subject line.\n"
-    "- body: a complete, polite plain-text email body. Write it in full; never "
-    "leave placeholders like [name].\n"
-    'If the message is not actually asking to send an email, return {"to": [], '
-    '"subject": "", "body": ""}.'
+    "You write the email the user is asking to send, USING THE CONVERSATION "
+    'CONTEXT. Return ONLY JSON {"to": ["email or name", ...], "subject": "...", '
+    '"body": "..."}.\n'
+    "- to: each recipient as an email address if present, else the person's name.\n"
+    "- subject: a SPECIFIC subject about the actual topic — never 'Message from "
+    "User' or similar.\n"
+    "- body: a complete, specific email about WHAT THE USER IS REFERRING TO. When "
+    "they say 'this', 'the issue', 'it', 'that', resolve it from the conversation "
+    "and include the real details (names, dates, issue ids, the actual situation). "
+    "NEVER write generic filler like 'you have been asked to receive an email'.\n"
+    'If it is not actually an email request, return {"to": [], "subject": "", '
+    '"body": ""}.'
 )
 
 
@@ -46,11 +49,24 @@ def looks_like_email_request(text: str) -> bool:
     return bool(_TRIGGER_RE.search(text or ""))
 
 
-async def extract_email(text: str, *, client: Any) -> dict | None:
-    """One LLM call → {to, subject, body, _in, _out, _model}. Returns None when
-    the model decides it isn't an email request. Re-raises provider errors
-    (e.g. RateLimitedError) so the caller can message the user appropriately."""
-    result = await client.complete(system=_EXTRACT_SYSTEM, user=text, json_mode=True)
+async def extract_email(
+    text: str, *, client: Any, history: list[dict[str, str]] | None = None
+) -> dict | None:
+    """One LLM call → {to, subject, body, _in, _out, _model}. `history` is the
+    recent Slack conversation so references like "email this" resolve to what was
+    just discussed. Returns None when it isn't an email request. Re-raises
+    provider errors (e.g. RateLimitedError) so the caller can message the user."""
+    convo = ""
+    if history:
+        lines = "\n".join(
+            f"{m.get('role', 'user')}: {m.get('content', '')}" for m in history[-8:]
+        )
+        convo = (
+            "CONVERSATION SO FAR (use this to resolve 'this' / 'the issue' / 'it'):\n"
+            f"{lines}\n\n"
+        )
+    user = f"{convo}EMAIL REQUEST FROM USER: {text}"
+    result = await client.complete(system=_EXTRACT_SYSTEM, user=user, json_mode=True)
     try:
         data = parse_json_response(result.text)
     except Exception as e:  # noqa: BLE001

@@ -157,12 +157,13 @@ async def _propose_email(
     slack_user_id: str,
     tenant_id: int | None,
     asked: str,
+    history: list[dict[str, str]] | None = None,
 ) -> bool:
-    """Draft an email from the message and post a Confirm/Cancel card. Returns
-    True if handled (proposed or messaged the user), False if it turned out not
-    to be an email request (caller falls back to Q&A)."""
+    """Draft an email from the message (+ conversation context, so "email this"
+    resolves to what was just discussed) and post a Confirm/Cancel card. Returns
+    True if handled, False if it wasn't an email request (caller falls to Q&A)."""
     client = get_llm_client()
-    draft = await extract_email(asked, client=client)
+    draft = await extract_email(asked, client=client, history=history)
     if draft and (draft.get("_in") or draft.get("_out")):
         await record_token_usage(
             session, tenant_id=tenant_id, source="slack",
@@ -438,6 +439,13 @@ async def _process_event(payload: dict) -> None:
             )
             return
 
+        # Recent conversation context — shared by email drafting (so "email this"
+        # resolves to what was just discussed) and the Q&A answer.
+        history = await _build_history(
+            conn, channel=channel, reply_thread=reply_thread, is_dm=is_dm,
+            bot_user_id=bot_user_id, exclude_ts=ts,
+        )
+
         # Confirm-first "mark dealt with": match the request to an open issue
         # and propose Confirm/Cancel instead of answering. (An email request that
         # mentions "close the issue" stays an email — handled by the next branch.)
@@ -471,7 +479,7 @@ async def _process_event(payload: dict) -> None:
                 handled = await _propose_email(
                     session, conn=conn, channel=channel, thread_ts=reply_thread,
                     team_id=str(team_id), slack_user_id=str(slack_user_id),
-                    tenant_id=identity.tenant_id, asked=asked,
+                    tenant_id=identity.tenant_id, asked=asked, history=history,
                 )
             except RateLimitedError:
                 handled = True
@@ -491,10 +499,6 @@ async def _process_event(payload: dict) -> None:
         # with the recent thread/DM history so the model holds context.
         ctx_token = current_tenant_id.set(identity.tenant_id)
         try:
-            history = await _build_history(
-                conn, channel=channel, reply_thread=reply_thread, is_dm=is_dm,
-                bot_user_id=bot_user_id, exclude_ts=ts,
-            )
             project = await get_or_create_default_project(session, tenant_id=identity.tenant_id)
             roster = await team_roster(session, tenant_id=identity.tenant_id)
             user_msg = (
