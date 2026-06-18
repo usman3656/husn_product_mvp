@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 /* ============================================================
    Reach Out For Me — the one-click outreach affordance that
@@ -79,11 +79,22 @@ function ReachOutModal({ context, onClose }: { context: ReachOutContext; onClose
   const [message, setMessage] = useState(context.draft);
   const [sent, setSent] = useState(false);
 
+  // Escape closes the modal. (Also keeps the host page — e.g. the briefing
+  // carousel — from reacting to keys meant for the dialog.)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { e.stopPropagation(); onClose(); }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
   return (
     <div
       role="dialog"
       aria-modal="true"
       aria-label="Reach out"
+      data-no-advance
       className="fixed inset-0 z-50 flex items-center justify-center px-4"
       style={{ background: "rgba(20, 20, 20, 0.42)", backdropFilter: "blur(4px)" }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}

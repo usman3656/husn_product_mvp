@@ -370,6 +370,84 @@ details > summary::-webkit-details-marker { display: none; }
 /* Numerals: tabular for figures, proportional for headlines */
 .tabular { font-variant-numeric: tabular-nums; }
 
+/* ============================================================
+   Briefing carousel — the briefing presented as a deck.
+   ============================================================ */
+.brf-stage {
+  position: relative;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg);
+}
+.brf-top {
+  display: flex; align-items: center; gap: 16px;
+  padding: 18px clamp(16px, 4vw, 48px) 10px;
+  flex-wrap: wrap;
+}
+.brf-meta { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.brf-dot { color: var(--muted-2); }
+.brf-rail { display: flex; align-items: center; gap: 6px; flex: 1 1 auto; justify-content: center; min-width: 150px; }
+/* Hit target padded to ~22px tall (≥44px on touch) while the visible bar
+   stays a 4px hairline. */
+.brf-seg { position: relative; width: clamp(16px, 5vw, 54px); padding: 9px 1px; background: transparent; cursor: pointer; border: 0; }
+.brf-seg-track { display: block; height: 4px; border-radius: 999px; background: var(--border); overflow: hidden; position: relative; }
+.brf-seg:hover .brf-seg-track { background: var(--border-strong); }
+.brf-seg-fill { position: absolute; inset: 0; transform-origin: left; transform: scaleX(0); border-radius: 999px; background: var(--accent); transition: transform .5s cubic-bezier(.2,.7,.2,1), background .3s; }
+.brf-seg[data-state="past"] .brf-seg-fill { transform: scaleX(1); background: var(--border-strong); }
+.brf-seg[data-state="on"]   .brf-seg-fill { transform: scaleX(1); background: var(--accent); }
+.brf-topright { display: flex; align-items: center; gap: 14px; margin-left: auto; }
+.brf-count { font-size: 12px; color: var(--muted); letter-spacing: .04em; }
+.brf-toggle { font-size: 12px; color: var(--muted); border: 1px solid var(--border); background: var(--panel); border-radius: 999px; padding: 5px 11px; cursor: pointer; }
+.brf-toggle:hover { color: var(--text); border-color: var(--border-strong); }
+
+.brf-center {
+  flex: 1 1 auto; overflow-y: auto; overflow-x: hidden;
+  display: flex; align-items: center; justify-content: center;
+  padding: 8px clamp(16px, 5vw, 72px) 40px;
+  cursor: pointer;
+}
+.brf-slidewrap { width: 100%; max-width: 1060px; margin: auto; }
+.brf-slidehead { display: flex; align-items: baseline; gap: 12px; margin-bottom: 18px; }
+.brf-kicker { font-size: 12px; font-weight: 600; color: var(--muted-2); letter-spacing: .08em; }
+.brf-h2 { font-size: clamp(22px, 3vw, 30px); }
+.brf-body { cursor: auto; }
+
+.brf-edge {
+  position: absolute; top: 50%; transform: translateY(-50%);
+  display: grid; place-items: center; width: 44px; height: 44px; border-radius: 999px;
+  background: var(--panel); border: 1px solid var(--border); color: var(--muted);
+  box-shadow: var(--shadow-sm); cursor: pointer; opacity: 0; z-index: 5;
+  transition: opacity .25s ease, color .15s ease, border-color .15s ease;
+}
+.brf-stage:hover .brf-edge { opacity: 1; }
+.brf-edge:focus-visible { opacity: 1; }
+.brf-edge:hover { color: var(--text); border-color: var(--border-strong); }
+.brf-edge:disabled { opacity: 0 !important; pointer-events: none; }
+.brf-edge-l { left: clamp(8px, 2vw, 22px); }
+.brf-edge-r { right: clamp(8px, 2vw, 22px); background: var(--text); color: var(--bg); border-color: var(--text); }
+
+.brf-bottom { display: flex; align-items: center; justify-content: center; gap: 18px; padding: 0 0 16px; }
+.brf-hint { font-size: 12px; color: var(--muted-2); letter-spacing: .02em; transition: opacity .6s ease; }
+.brf-hint[data-faded="1"] { opacity: 0.35; }
+/* Touch prev/next — desktop uses the hover edge chevrons instead. */
+.brf-mnav { display: none; place-items: center; width: 40px; height: 40px; border-radius: 999px; border: 1px solid var(--border); background: var(--panel); color: var(--muted); cursor: pointer; }
+.brf-mnav:disabled { opacity: .35; pointer-events: none; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .brf-slide { animation: brf-fade 380ms ease both; }
+  @keyframes brf-fade { from { opacity: 0; } to { opacity: 1; } }
+  .brf-rise { animation: brf-rise-up 540ms cubic-bezier(.2,.7,.2,1) both; }
+  @keyframes brf-rise-up { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: none; } }
+}
+
+@media (max-width: 767px) {
+  .brf-center { padding-bottom: 12px; }
+  .brf-edge { display: none; }
+  .brf-mnav { display: grid; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }
 }

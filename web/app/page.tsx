@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { BriefingCarousel, type CarouselSlide } from "@/components/briefing-carousel";
 import { DealtWithButton } from "@/components/dealt-with-button";
 import { Pulse as PulseStrip, type PulseDatum } from "@/components/pulse";
 import { ReachOutButton, type ReachOutContext } from "@/components/reach-out";
@@ -264,66 +265,69 @@ export default async function Briefing() {
   const risks = emergingRisks(findings);
   const missing = missingInformation(findings);
 
+  // The briefing is presented as a deck: each section fills the stage and you
+  // advance through them. Sections are rendered server-side and handed to the
+  // client carousel as slide nodes (data + derivations stay here).
+  const slides: CarouselSlide[] = [
+    {
+      id: "intro",
+      node: (
+        <div style={{ maxWidth: 720 }}>
+          <h1 className="husn-display">Today&apos;s briefing.</h1>
+          <p className="husn-prose mt-5 max-w-[60ch]">{leadIn(findings.length, conf)}</p>
+          <div className="mt-7 flex flex-wrap items-center gap-3">
+            <SyncNowButton isAdmin={isAdmin} />
+            <Link href="/ask" className="text-[13.5px] font-medium" style={{ color: "var(--accent)" }}>
+              Ask Husn anything →
+            </Link>
+          </div>
+        </div>
+      ),
+    },
+    {
+      id: "pulse",
+      kicker: "01",
+      title: "Organizational Pulse",
+      node: <PulseStrip data={pulseData(findings, conf, alig, mom, risks)} />,
+    },
+    {
+      id: "consequential",
+      kicker: "02",
+      title: "Most Consequential",
+      node: top ? <ConsequentialIssue f={top} /> : <AllClear />,
+    },
+    {
+      id: "risks",
+      kicker: "03",
+      title: "Emerging Risks",
+      node: <RiskList items={risks} />,
+    },
+    {
+      id: "missing",
+      kicker: "04",
+      title: "Missing Information",
+      node: <MissingList items={missing} />,
+    },
+    {
+      id: "actions",
+      kicker: "05",
+      title: "Recommended Actions",
+      node: <RecommendedActions findings={findings} />,
+    },
+    {
+      id: "projects",
+      kicker: "06",
+      title: "Active Projects",
+      node: <ActiveProjects projects={projects} findings={findings} />,
+    },
+  ];
+
   return (
-    <main className="mx-auto px-6 lg:px-12 pt-12 pb-32" style={{ maxWidth: 1100 }}>
-      {/* Editorial header */}
-      <header className="husn-rise" style={{ maxWidth: 720 }}>
-        <p className="husn-meta">
-          {todayHeadline()} · The brief, refreshed {timeAgo(lastRun)}
-        </p>
-        <h1 className="husn-display mt-4">Today&apos;s briefing.</h1>
-        <p className="husn-prose mt-5 max-w-[60ch]">
-          {leadIn(findings.length, conf)}
-        </p>
-        <SyncNowButton isAdmin={isAdmin} />
-      </header>
-
-      {/* 1. Organizational Pulse */}
-      <section className="mt-14 husn-rise" style={{ animationDelay: "40ms" }}>
-        <SectionLabel kicker="01" title="Organizational Pulse" />
-        <PulseStrip data={pulseData(findings, conf, alig, mom, risks)} />
-      </section>
-
-      {/* 2. Most Consequential Issue */}
-      <section className="mt-20 husn-rise" style={{ animationDelay: "100ms" }}>
-        <SectionLabel kicker="02" title="Most Consequential" />
-        {top ? <ConsequentialIssue f={top} /> : <AllClear />}
-      </section>
-
-      {/* 3. Emerging Risks + 4. Missing Information — side by side editorial columns */}
-      <section className="mt-20 grid grid-cols-1 lg:grid-cols-2 gap-10 husn-rise" style={{ animationDelay: "160ms" }}>
-        <div>
-          <SectionLabel kicker="03" title="Emerging Risks" />
-          <RiskList items={risks} />
-        </div>
-        <div>
-          <SectionLabel kicker="04" title="Missing Information" />
-          <MissingList items={missing} />
-        </div>
-      </section>
-
-      {/* 5. Recommended Actions */}
-      <section className="mt-20 husn-rise" style={{ animationDelay: "220ms" }}>
-        <SectionLabel kicker="05" title="Recommended Actions" />
-        <RecommendedActions findings={findings} />
-      </section>
-
-      {/* 6. Active Projects */}
-      <section className="mt-20 husn-rise" style={{ animationDelay: "280ms" }}>
-        <SectionLabel kicker="06" title="Active Projects" />
-        <ActiveProjects projects={projects} findings={findings} />
-      </section>
-
-      <footer className="mt-24 pt-6 border-t" style={{ borderColor: "var(--rule)" }}>
-        <p className="husn-meta">
-          Husn reads continuously across your tools.{" "}
-          <Link href="/ask" style={{ color: "var(--accent)" }} className="font-medium">
-            Ask Husn anything
-          </Link>{" "}
-          to dig deeper.
-        </p>
-      </footer>
-    </main>
+    <BriefingCarousel
+      slides={slides}
+      dateLabel={todayHeadline()}
+      refreshedLabel={timeAgo(lastRun)}
+    />
   );
 }
 
