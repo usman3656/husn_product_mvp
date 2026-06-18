@@ -281,16 +281,7 @@ export default async function Briefing() {
           <p className="husn-prose max-w-[68ch]" style={{ fontSize: 16.5 }}>
             {leadIn(findings.length, conf)}
           </p>
-          <div className="mt-6">
-            <Link
-              href="/connections"
-              className="inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-[13.5px] font-semibold"
-              style={{ background: "var(--text)", color: "var(--bg)" }}
-            >
-              Open connections →
-            </Link>
-          </div>
-          <p className="husn-eyebrow mt-9 mb-3">Organizational Pulse</p>
+          <p className="husn-eyebrow mt-8 mb-3">Organizational Pulse</p>
           <PulseStrip data={pulseData(findings, conf, alig, mom, risks)} />
         </div>
       ),
@@ -348,11 +339,6 @@ export default async function Briefing() {
       title="Today's briefing"
       dateLabel={todayHeadline()}
       refreshedLabel={timeAgo(lastRun)}
-      headerSlot={
-        <Link href="/connections" className="brf-toggle">
-          Connections →
-        </Link>
-      }
     />
   );
 }
@@ -373,15 +359,6 @@ function BriefingAwaiting({ isAdmin = false }: { isAdmin?: boolean }) {
           Connect a tool and Husn will start reading. Your first briefing
           builds within about an hour of the first sync.
         </p>
-        <div className="mt-7">
-          <Link
-            href="/connections"
-            className="inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-[14px] font-semibold"
-            style={{ background: "var(--text)", color: "var(--bg)" }}
-          >
-            Open connections →
-          </Link>
-        </div>
       </header>
 
       <section className="mt-14 husn-rise" style={{ animationDelay: "40ms" }}>
