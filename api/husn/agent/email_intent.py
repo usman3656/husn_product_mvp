@@ -20,8 +20,12 @@ from husn.db.models import DirectoryContact
 
 _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
 _TRIGGER_RE = re.compile(
-    r"\b(send|draft|write|compose|shoot|fire off)\b[^.]{0,40}\bemail\b"
-    r"|\bemail\b[^.]{0,20}@",
+    # "send/draft/… an email …"
+    r"\b(send|draft|write|compose|shoot|fire off|drop|send out|forward)\b[^.?!]{0,40}\be-?mail\b"
+    # "email <recipient> to/about/the/him/… " (email used as an imperative verb)
+    r"|\bemail\b[^.?!]{0,40}\b(to|about|regarding|saying|with|the|him|her|them|everyone|@)"
+    # message that starts with an email command
+    r"|^\s*(can you |could you |please |pls |hey,? )?e-?mail\b",
     re.IGNORECASE,
 )
 
