@@ -29,12 +29,17 @@ const INTERACTIVE = 'a,button,input,textarea,select,label,[role="button"],[data-
 
 export function BriefingCarousel({
   slides,
+  title = "Today's briefing",
   dateLabel,
   refreshedLabel,
+  headerSlot,
 }: {
   slides: CarouselSlide[];
+  title?: string;
   dateLabel: string;
   refreshedLabel: string;
+  /** Optional actions rendered in the top bar (e.g. a Connections link). */
+  headerSlot?: React.ReactNode;
 }) {
   const n = slides.length;
   const [index, setIndex] = useState(0);
@@ -170,12 +175,14 @@ export function BriefingCarousel({
       {/* Stable live region for screen-reader announcements on slide change. */}
       <div aria-live="polite" className="sr-only">{live}</div>
 
-      {/* Top: meta + progress rail + scroll toggle */}
+      {/* Top: deck identity + progress rail + actions */}
       <header className="brf-top">
         <div className="brf-meta">
-          <span className="husn-meta">{dateLabel}</span>
+          <span className="brf-title">{title}</span>
           <span className="brf-dot" aria-hidden>·</span>
-          <span className="husn-meta">refreshed {refreshedLabel}</span>
+          <span className="husn-meta">{dateLabel}</span>
+          <span className="brf-dot brf-dot-hide" aria-hidden>·</span>
+          <span className="husn-meta brf-dot-hide">refreshed {refreshedLabel}</span>
         </div>
         <div className="brf-rail" aria-label="Jump to section">
           {slides.map((s, i) => (
@@ -192,6 +199,7 @@ export function BriefingCarousel({
           ))}
         </div>
         <div className="brf-topright">
+          {headerSlot}
           <span className="brf-count tabular">
             {String(index + 1).padStart(2, "0")} / {String(n).padStart(2, "0")}
           </span>
@@ -210,24 +218,23 @@ export function BriefingCarousel({
         onTouchStart={onTouchStart}
         onTouchEnd={onTouchEnd}
       >
-        <div className="brf-slidewrap">
-          <div
-            key={index}
-            ref={slideRef}
-            tabIndex={-1}
-            className="brf-slide"
-            data-dir={dir}
-            aria-label={slide.title ?? "Overview"}
-          >
+        <div
+          key={index}
+          ref={slideRef}
+          tabIndex={-1}
+          className="brf-slide"
+          data-dir={dir}
+          aria-label={slide.title ?? "Overview"}
+        >
+          <div className="brf-canvas">
+            {slide.kicker ? <span className="brf-watermark tabular" aria-hidden>{slide.kicker}</span> : null}
             {slide.title ? (
-              <div className="brf-slidehead brf-rise">
+              <div className="brf-slidehead">
                 {slide.kicker ? <span className="brf-kicker tabular">{slide.kicker}</span> : null}
-                <h2 className="husn-heading brf-h2">{slide.title}</h2>
+                <h2 className="brf-h2">{slide.title}</h2>
               </div>
             ) : null}
-            <div className="brf-body brf-rise" style={{ animationDelay: "90ms" }}>
-              {slide.node}
-            </div>
+            <div className="brf-body">{slide.node}</div>
           </div>
         </div>
       </div>

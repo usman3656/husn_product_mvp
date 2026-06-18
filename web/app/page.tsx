@@ -270,25 +270,17 @@ export default async function Briefing() {
   // client carousel as slide nodes (data + derivations stay here).
   const slides: CarouselSlide[] = [
     {
-      id: "intro",
-      node: (
-        <div style={{ maxWidth: 720 }}>
-          <h1 className="husn-display">Today&apos;s briefing.</h1>
-          <p className="husn-prose mt-5 max-w-[60ch]">{leadIn(findings.length, conf)}</p>
-          <div className="mt-7 flex flex-wrap items-center gap-3">
-            <SyncNowButton isAdmin={isAdmin} />
-            <Link href="/ask" className="text-[13.5px] font-medium" style={{ color: "var(--accent)" }}>
-              Ask Husn anything →
-            </Link>
-          </div>
-        </div>
-      ),
-    },
-    {
       id: "pulse",
       kicker: "01",
       title: "Organizational Pulse",
-      node: <PulseStrip data={pulseData(findings, conf, alig, mom, risks)} />,
+      node: (
+        <div>
+          <p className="husn-prose max-w-[68ch] mb-7" style={{ fontSize: 16 }}>
+            {leadIn(findings.length, conf)}
+          </p>
+          <PulseStrip data={pulseData(findings, conf, alig, mom, risks)} />
+        </div>
+      ),
     },
     {
       id: "consequential",
@@ -325,8 +317,14 @@ export default async function Briefing() {
   return (
     <BriefingCarousel
       slides={slides}
+      title="Today's briefing"
       dateLabel={todayHeadline()}
       refreshedLabel={timeAgo(lastRun)}
+      headerSlot={
+        <Link href="/connections" className="brf-toggle">
+          Connections →
+        </Link>
+      }
     />
   );
 }

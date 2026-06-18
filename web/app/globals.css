@@ -379,7 +379,8 @@ details > summary::-webkit-details-marker { display: none; }
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: var(--bg);
+  background:
+    radial-gradient(125% 85% at 82% -12%, color-mix(in srgb, var(--accent) 5%, var(--bg)), var(--bg) 55%);
 }
 .brf-top {
   display: flex; align-items: center; gap: 16px;
@@ -408,11 +409,34 @@ details > summary::-webkit-details-marker { display: none; }
   padding: 8px clamp(16px, 5vw, 72px) 40px;
   cursor: pointer;
 }
-.brf-slidewrap { width: 100%; max-width: 1060px; margin: auto; }
-.brf-slidehead { display: flex; align-items: baseline; gap: 12px; margin-bottom: 18px; }
-.brf-kicker { font-size: 12px; font-weight: 600; color: var(--muted-2); letter-spacing: .08em; }
-.brf-h2 { font-size: clamp(22px, 3vw, 30px); }
-.brf-body { cursor: auto; }
+/* Every slide is the same large "canvas" so sparse and dense sections both
+   read as composed scenes, not floating tiles. A giant faint section numeral
+   anchors the composition. */
+.brf-slide { width: 100%; }
+/* The slide is a programmatic focus target (keyboard/SR) — never ring it. */
+.brf-slide:focus, .brf-slide:focus-visible { outline: none; box-shadow: none; }
+.brf-canvas {
+  position: relative; width: 100%; max-width: 1180px; margin: 0 auto;
+  min-height: min(70vh, 640px); display: flex; flex-direction: column;
+}
+.brf-watermark {
+  position: absolute; right: -0.5vw; bottom: -7vh; z-index: 0;
+  font-size: min(44vh, 400px); font-weight: 800; line-height: .8;
+  letter-spacing: -0.05em; color: var(--text); opacity: 0.04;
+  pointer-events: none; user-select: none;
+}
+.brf-slidehead {
+  position: relative; z-index: 1; display: flex; align-items: baseline; gap: 16px;
+  padding-bottom: 18px; border-bottom: 1px solid var(--rule);
+}
+.brf-kicker { font-size: 13px; font-weight: 700; color: var(--accent); letter-spacing: .14em; }
+.brf-h2 { font-size: clamp(26px, 3.4vw, 40px); font-weight: 600; letter-spacing: -0.022em; line-height: 1.04; }
+.brf-body {
+  position: relative; z-index: 1; flex: 1 1 auto;
+  display: flex; flex-direction: column; justify-content: flex-start;
+  padding-top: 32px; cursor: auto;
+}
+.brf-title { font-size: 13px; font-weight: 600; color: var(--text); letter-spacing: -0.01em; }
 
 .brf-edge {
   position: absolute; top: 50%; transform: translateY(-50%);
@@ -436,11 +460,18 @@ details > summary::-webkit-details-marker { display: none; }
 .brf-mnav:disabled { opacity: .35; pointer-events: none; }
 
 @media (prefers-reduced-motion: no-preference) {
-  .brf-slide { animation: brf-fade 380ms ease both; }
-  @keyframes brf-fade { from { opacity: 0; } to { opacity: 1; } }
-  .brf-rise { animation: brf-rise-up 540ms cubic-bezier(.2,.7,.2,1) both; }
-  @keyframes brf-rise-up { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: none; } }
+  /* Camera zoom: advancing zooms in, going back zooms out. The header and body
+     then rise in with a slight stagger so the scene composes itself. */
+  .brf-slide { animation: brf-zin 580ms cubic-bezier(.22, .61, .21, 1) both; }
+  .brf-slide[data-dir="-1"] { animation-name: brf-zout; }
+  @keyframes brf-zin  { from { opacity: 0; transform: scale(.93); } to { opacity: 1; transform: scale(1); } }
+  @keyframes brf-zout { from { opacity: 0; transform: scale(1.07); } to { opacity: 1; transform: scale(1); } }
+  .brf-slidehead { animation: brf-rise-up 520ms cubic-bezier(.2, .7, .2, 1) both; }
+  .brf-body { animation: brf-rise-up 660ms cubic-bezier(.2, .7, .2, 1) 110ms both; }
+  @keyframes brf-rise-up { from { opacity: 0; transform: translateY(13px); } to { opacity: 1; transform: none; } }
 }
+
+@media (max-width: 980px) { .brf-dot-hide { display: none; } }
 
 @media (max-width: 767px) {
   .brf-center { padding-bottom: 12px; }
