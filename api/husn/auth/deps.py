@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from husn.auth.sessions import COOKIE_NAME, read_session
 from husn.core.config import get_settings
+from husn.core.logging import log
 from husn.db.models import Membership, User
 from husn.db.session import get_session
 
@@ -50,6 +51,32 @@ class AuthContext:
 
 
 _BRIDGE = AuthContext(user_id=None, email=None, tenant_id=None, role=None)
+
+
+def _session_ids(request: Request) -> list[str]:
+    """Every husn_session value in the raw Cookie header, in order, de-duped.
+
+    A browser can hold MORE THAN ONE cookie named husn_session — e.g. a stale
+    HOST-ONLY one set on api.husn.io back when COOKIE_DOMAIN was unset, plus a
+    parent-domain (.husn.io) one set after the cutover. Both are sent to the
+    API, but Starlette's request.cookies collapses duplicate names to a single
+    value. If that single value is the stale one, _resolve sees "session
+    expired" and 401s even though the user is validly logged in — and a fresh
+    login doesn't help, because the stale cookie is still there and may still
+    win. So we read the raw header and try EVERY candidate; the first that
+    resolves to a live Redis session wins. All candidates belong to the same
+    browser, so accepting any valid one is correct (no security change)."""
+    raw = request.headers.get("cookie")
+    if not raw:
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for part in raw.split(";"):
+        name, sep, value = part.strip().partition("=")
+        if sep and name == COOKIE_NAME and value and value not in seen:
+            seen.add(value)
+            out.append(value)
+    return out
 
 
 def csrf_check(request: Request) -> None:
@@ -81,10 +108,22 @@ _csrf_check = csrf_check
 
 
 async def _resolve(request: Request, db: AsyncSession) -> AuthContext:
-    sid = request.cookies.get(COOKIE_NAME)
-    if not sid:
+    sids = _session_ids(request)
+    if not sids:
         raise HTTPException(401, "not signed in")
-    sess = await read_session(sid)
+    sess = None
+    for sid in sids:
+        sess = await read_session(sid)
+        if sess is not None:
+            break
+    if len(sids) > 1:
+        # Diagnostic: confirms the duplicate-cookie condition in prod and
+        # whether one of the candidates resolved. Safe to leave on.
+        log.info(
+            "husn.auth.multiple_session_cookies",
+            count=len(sids),
+            resolved=sess is not None,
+        )
     if sess is None:
         raise HTTPException(401, "session expired")
 

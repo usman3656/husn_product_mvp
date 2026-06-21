@@ -82,5 +82,54 @@
 	}
 }
 
+# ---------- staging.husn.io : Next.js SSR (staging stack) ----------
+# Proxies to the husn-staging compose project's web container by network alias.
+# The staging web/api containers join prod's `husn_edge` network (as external)
+# with aliases staging-web / staging-api, so this prod caddy (already on
+# husn_edge) reaches them by name — no host ports / host.docker.internal needed.
+staging.husn.io {
+	import security_headers
+	encode zstd gzip
+	log {
+		output stdout
+		format json
+	}
+	reverse_proxy staging-web:3000 {
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+		header_up X-Forwarded-Host {host}
+		flush_interval -1
+		transport http {
+			read_timeout 5m
+			write_timeout 5m
+		}
+	}
+}
+
+# ---------- api-staging.husn.io : FastAPI (staging stack) ----------
+api-staging.husn.io {
+	import security_headers
+	encode zstd gzip
+	log {
+		output stdout
+		format json
+	}
+	@oauth_callback path_regexp ^/auth/[^/]+/callback
+	header @oauth_callback Cache-Control "no-store"
+	header @oauth_callback Pragma "no-cache"
+	reverse_proxy staging-api:8000 {
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+		header_up X-Forwarded-Host {host}
+		flush_interval -1
+		transport http {
+			read_timeout 5m
+			write_timeout 5m
+		}
+	}
+}
+
 # Apex husn.io + www.husn.io are intentionally NOT served here.
 # They keep pointing at the existing marketing site at the registrar.

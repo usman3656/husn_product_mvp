@@ -79,6 +79,9 @@ export function ConnectionsList() {
   async function refresh() {
     try {
       const r = await clientFetch("/api/connections", { cache: "no-store" });
+      // 401 → session gone; clientFetch is already redirecting to /login, so
+      // don't flash the misleading "API may be slow" card on the way out.
+      if (r.status === 401) return;
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const body = (await r.json()) as { items: ConnectionRow[] };
       setItems(body.items);

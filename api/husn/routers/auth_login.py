@@ -67,6 +67,13 @@ router = APIRouter(prefix="/auth", tags=["auth-login"])
 
 def _set_cookie(response: Response, sid: str) -> None:
     s = get_settings()
+    # When we scope the session cookie to a parent domain (.husn.io), proactively
+    # delete any stale HOST-ONLY husn_session left from before COOKIE_DOMAIN was
+    # set. Otherwise the browser keeps BOTH and may send/read the dead one → 401
+    # even right after this fresh login. (deps._session_ids also tolerates this
+    # at read time; this clears it at the source.)
+    if s.cookie_domain:
+        response.delete_cookie(COOKIE_NAME, domain=None, path="/")
     response.set_cookie(
         key=COOKIE_NAME,
         value=sid,
@@ -82,6 +89,9 @@ def _set_cookie(response: Response, sid: str) -> None:
 def _clear_cookie(response: Response) -> None:
     s = get_settings()
     response.delete_cookie(COOKIE_NAME, domain=s.cookie_domain or None, path="/")
+    # Also clear the host-only variant so a stale duplicate can't survive logout.
+    if s.cookie_domain:
+        response.delete_cookie(COOKIE_NAME, domain=None, path="/")
 
 
 def _slugify(name: str) -> str:
