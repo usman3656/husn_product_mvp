@@ -83,9 +83,10 @@
 }
 
 # ---------- staging.husn.io : Next.js SSR (staging stack) ----------
-# Proxies to the husn-staging compose project's web container, published on the
-# host at 127.0.0.1:3001. Reached via host.docker.internal (see caddy
-# extra_hosts in docker-compose.prod.yml).
+# Proxies to the husn-staging compose project's web container by network alias.
+# The staging web/api containers join prod's `husn_edge` network (as external)
+# with aliases staging-web / staging-api, so this prod caddy (already on
+# husn_edge) reaches them by name — no host ports / host.docker.internal needed.
 staging.husn.io {
 	import security_headers
 	encode zstd gzip
@@ -93,7 +94,7 @@ staging.husn.io {
 		output stdout
 		format json
 	}
-	reverse_proxy host.docker.internal:3001 {
+	reverse_proxy staging-web:3000 {
 		header_up X-Real-IP {remote_host}
 		header_up X-Forwarded-For {remote_host}
 		header_up X-Forwarded-Proto {scheme}
@@ -117,7 +118,7 @@ api-staging.husn.io {
 	@oauth_callback path_regexp ^/auth/[^/]+/callback
 	header @oauth_callback Cache-Control "no-store"
 	header @oauth_callback Pragma "no-cache"
-	reverse_proxy host.docker.internal:8001 {
+	reverse_proxy staging-api:8000 {
 		header_up X-Real-IP {remote_host}
 		header_up X-Forwarded-For {remote_host}
 		header_up X-Forwarded-Proto {scheme}
