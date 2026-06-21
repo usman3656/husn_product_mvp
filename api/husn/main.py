@@ -2,9 +2,60 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.datastructures import MutableHeaders
 
+from husn.auth.sessions import COOKIE_NAME
 from husn.core.config import get_settings
 from husn.core.logging import configure_logging, log
+
+
+class ShedStaleSessionCookie:
+    """Auto-heal duplicate husn_session cookies.
+
+    A browser can hold a stale HOST-ONLY husn_session (set on api.husn.io
+    before COOKIE_DOMAIN=.husn.io) alongside the valid parent-domain one. The
+    edge proxy collapses the duplicate to a single value before it reaches the
+    app, and if the stale one wins, every authed call 401s — and re-login alone
+    doesn't help while the stale cookie lingers.
+
+    On any 401 where the request DID carry a husn_session cookie, we append a
+    Set-Cookie that deletes the host-only variant (no Domain attribute). The
+    valid .husn.io cookie is a different cookie and is left untouched, so the
+    next request carries only it and resolves. This only fires on a failed
+    auth, so a single valid host-only session (which resolves fine and never
+    401s) is never touched.
+
+    Pure ASGI (not BaseHTTPMiddleware): it inspects only http.response.start
+    and never buffers the body, so SSE / streaming responses are unaffected."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        s = get_settings()
+        has_cookie = False
+        if s.cookie_domain:
+            for k, v in scope.get("headers", []):
+                if k == b"cookie" and (COOKIE_NAME + "=").encode() in v:
+                    has_cookie = True
+                    break
+
+        async def send_wrapper(message):
+            if (
+                has_cookie
+                and message["type"] == "http.response.start"
+                and message["status"] == 401
+            ):
+                headers = MutableHeaders(raw=message["headers"])
+                headers.append(
+                    "set-cookie", f"{COOKIE_NAME}=; Max-Age=0; Path=/; SameSite=Lax"
+                )
+            await send(message)
+
+        await self.app(scope, receive, send_wrapper)
 from husn.routers import (
     admin_diag,
     agent,
@@ -57,6 +108,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# Outer of CORS: sheds a stale host-only husn_session on 401 so duplicate
+# cookies self-heal without a re-login. CORS still wraps the final response.
+app.add_middleware(ShedStaleSessionCookie)
 
 app.include_router(health.router)
 app.include_router(auth_login.router)
