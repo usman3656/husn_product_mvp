@@ -1,0 +1,164 @@
+# docker-compose.staging.yml
+# Isolated STAGING stack on the SAME box as prod. Separate Compose project
+# (name: husn-staging) → its own containers + volumes (so it NEVER shares the
+# prod database/redis). web/api publish on localhost ports; the prod Caddy
+# reverse-proxies staging.husn.io / api-staging.husn.io to them (see STAGING.md).
+#
+# Bring up (from the ~/husn-staging checkout on the `staging` branch):
+#   docker compose -f docker-compose.staging.yml --env-file .env.staging up -d
+#
+# Memory limits are smaller than prod so both stacks fit on the 8 GB box.
+
+name: husn-staging
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+networks:
+  edge:
+    driver: bridge
+  internal:
+    driver: bridge
+    internal: true
+
+volumes:
+  pg_data:
+  redis_data:
+
+services:
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile.prod
+      args:
+        NEXT_PUBLIC_API_URL: https://${DOMAIN_API}
+    restart: unless-stopped
+    env_file: .env.staging
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      API_URL: http://api:8000
+      NEXT_PUBLIC_API_URL: https://${DOMAIN_API}
+    # Localhost-only host port; the prod Caddy reaches it via host.docker.internal.
+    ports:
+      - "127.0.0.1:3001:3000"
+    networks: [edge, internal]
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+    logging: *default-logging
+
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: .env.staging
+    environment:
+      ENV: staging
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://redis:6379/0
+      JIRA_REDIRECT_URI: https://${DOMAIN_API}/auth/jira/callback
+      SLACK_REDIRECT_URI: https://${DOMAIN_API}/auth/slack/callback
+      GOOGLE_REDIRECT_URI: https://${DOMAIN_API}/auth/google/callback
+      MS_REDIRECT_URI: https://${DOMAIN_API}/auth/microsoft/callback
+    command: ["uvicorn", "husn.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--proxy-headers", "--forwarded-allow-ips", "*"]
+    ports:
+      - "127.0.0.1:8001:8000"
+    networks: [edge, internal]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health/lite"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+    logging: *default-logging
+
+  worker:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: .env.staging
+    environment:
+      ENV: staging
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://redis:6379/0
+    command: ["arq", "husn.workers.WorkerSettings"]
+    networks: [edge, internal]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      disable: true
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+    logging: *default-logging
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    networks: [internal]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    shm_size: 128mb
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+    logging: *default-logging
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "128mb", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - redis_data:/data
+    networks: [internal]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+    logging: *default-logging
