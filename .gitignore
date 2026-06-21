@@ -29,3 +29,8 @@ redis_data/
 .claude/audit.log
 .claude/settings.local.json
 .last-deployed-sha
+
+# Business / pitch documents — never commit
+*.xlsx
+*.pptx
+*.docx
