@@ -23,11 +23,6 @@ networks:
   internal:
     driver: bridge
     internal: true
-  # Prod's existing caddy network. web/api join it (aliases staging-web/
-  # staging-api) so the prod caddy reaches them by name — see Caddyfile.
-  husn_edge:
-    external: true
-    name: husn_edge
 
 volumes:
   pg_data:
@@ -47,15 +42,10 @@ services:
       PORT: "3000"
       API_URL: http://api:8000
       NEXT_PUBLIC_API_URL: https://${DOMAIN_API}
-    # Localhost host port kept for SSH-tunnel testing; the prod Caddy reaches
-    # this container by its husn_edge alias (staging-web), not via the port.
+    # Localhost-only host port; the prod Caddy reaches it via host.docker.internal.
     ports:
       - "127.0.0.1:3001:3000"
-    networks:
-      edge:
-      internal:
-      husn_edge:
-        aliases: [staging-web]
+    networks: [edge, internal]
     depends_on:
       api:
         condition: service_healthy
@@ -88,11 +78,7 @@ services:
     command: ["uvicorn", "husn.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--proxy-headers", "--forwarded-allow-ips", "*"]
     ports:
       - "127.0.0.1:8001:8000"
-    networks:
-      edge:
-      internal:
-      husn_edge:
-        aliases: [staging-api]
+    networks: [edge, internal]
     depends_on:
       postgres:
         condition: service_healthy
