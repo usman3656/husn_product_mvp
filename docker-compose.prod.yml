@@ -43,6 +43,10 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
+    # Lets the staging site blocks in the Caddyfile reach the husn-staging
+    # web/api containers, which publish on the host at 127.0.0.1:3001/8001.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - edge
     depends_on:
