@@ -1,30 +1,31 @@
 #!/usr/bin/env bash
-# scripts/auto-deploy-staging.sh
-# Cron-friendly: redeploy STAGING when the `staging` branch has new commits.
-# Quiet on the happy path. Logs to /var/log/husn-staging-auto-deploy.log.
-# Install: add a root cron entry (every 2 min):
-#   */2 * * * * /home/<user>/husn-staging/scripts/auto-deploy-staging.sh
+# scripts/auto-deploy-staging.sh — poll origin/staging and deploy on change.
+# Runs from cron ON THE STAGING BOX only. Install with:
+#   */3 * * * * /root/husn-staging/scripts/auto-deploy-staging.sh  # husn-staging-auto-deploy
+#
+# Single-flighted via flock so overlapping cron ticks can't race. Deploys only
+# when origin/staging has actually moved, so it's cheap to run often.
 set -euo pipefail
 
-REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-LOG="/var/log/husn-staging-auto-deploy.log"
-cd "$REPO"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+LOG=/var/log/husn-staging-auto-deploy.log
+LOCK=/tmp/husn-staging-auto-deploy.lock
 
-# Lock so two cron ticks can't race.
-exec 9>>"/tmp/husn-staging-auto-deploy.lock"
-flock -n 9 || exit 0
+exec 9>"$LOCK"
+flock -n 9 || { echo "$(date -u +%FT%TZ) another run in progress, skip" >>"$LOG"; exit 0; }
 
-git fetch origin staging --quiet
+cd "$REPO_ROOT"
+git fetch --quiet origin staging
 LOCAL=$(git rev-parse HEAD)
 REMOTE=$(git rev-parse origin/staging)
+
 if [[ "$LOCAL" == "$REMOTE" ]]; then
-  exit 0
+  exit 0   # nothing new
 fi
 
 {
-  echo
-  echo "=== $(date -u +%Y-%m-%dT%H:%M:%SZ) staging: new commits, deploying ==="
-  echo "from: $LOCAL  to: $REMOTE"
-  "$REPO/scripts/deploy-staging.sh" --fast
-  echo "=== done ==="
+  echo "==================================================================="
+  echo "$(date -u +%FT%TZ) staging deploy: $LOCAL -> $REMOTE"
+  ./scripts/deploy-staging.sh --fast
+  echo "$(date -u +%FT%TZ) staging deploy done"
 } >>"$LOG" 2>&1
