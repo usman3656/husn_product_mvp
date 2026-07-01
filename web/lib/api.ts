@@ -10,6 +10,8 @@
  *    Redirects to /login on 401 when the wall is up.
  */
 
+import { demoJson, demoMutation } from "@/lib/demo/mclean";
+
 const SERVER_API_URL = process.env.API_URL ?? "http://api:8000";
 const BROWSER_API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -30,8 +32,13 @@ export async function serverFetch(path: string, init?: RequestInit): Promise<Res
   });
 }
 
-/** Convenience: server-side JSON fetch returning null on any failure. */
+/** Convenience: server-side JSON fetch returning null on any failure.
+ *  When a demo tenant is active, demo fixtures short-circuit the live API for
+ *  read endpoints the demo owns (see lib/demo/mclean.ts); everything else
+ *  (auth, mutations) falls through unchanged. */
 export async function serverJson<T>(path: string): Promise<T | null> {
+  const demo = demoJson(path);
+  if (demo !== undefined) return demo as T;
   try {
     const r = await serverFetch(path);
     if (!r.ok) return null;
@@ -53,6 +60,10 @@ export async function clientFetch(path: string, init?: RequestInit): Promise<Res
     headers["X-Husn-Csrf"] = "1";
     if (!headers["Content-Type"] && init?.body) headers["Content-Type"] = "application/json";
   }
+  // Demo tenant: short-circuit demo-owned mutations so buttons on fixture data
+  // don't 404 against the live API. Everything else falls through unchanged.
+  const dm = demoMutation(path, method);
+  if (dm) return dm;
   const r = await fetch(`${BROWSER_API_URL}${path}`, {
     ...init,
     headers,

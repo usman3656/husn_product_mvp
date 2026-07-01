@@ -6,9 +6,9 @@ import { MobileBar, SideNav } from "@/components/side-nav";
 import { THEME_BOOT_SCRIPT } from "@/components/theme-toggle";
 
 export const metadata: Metadata = {
-  title: "Husn for McLean Hospital — clinical coordination intelligence",
+  title: "husn — organizational intelligence",
   description:
-    "Husn reads across the tools McLean's teams already use and surfaces what's drifting, who owns what, and what's at risk — before the meeting. Every claim stays sourced.",
+    "The intelligence layer for your organization. Husn briefs you on what's drifting, what's owned, and what's at risk — before the status meeting.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

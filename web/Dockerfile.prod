@@ -16,6 +16,12 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ARG NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
 
+# Demo tenant selector (inlined at build time like any NEXT_PUBLIC_*). Unset or
+# "mclean" => the McLean Hospital demo fixtures render (see web/lib/demo).
+# Set to anything else (e.g. "off") to disable and run against live data only.
+ARG NEXT_PUBLIC_DEMO_TENANT=mclean
+ENV NEXT_PUBLIC_DEMO_TENANT=${NEXT_PUBLIC_DEMO_TENANT}
+
 # Install deps. `package-lock.json*` makes the lockfile optional (use npm ci
 # if present, npm install otherwise).
 COPY package.json package-lock.json* ./

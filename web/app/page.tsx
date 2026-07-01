@@ -72,7 +72,7 @@ type Project = {
   scopes: { source: string; kind: string; id: string }[];
 };
 
-const SOURCE_LABEL: Record<string, string> = { jira: "Jira", slack: "Slack", google: "Google", microsoft: "Microsoft", email: "Email" };
+const SOURCE_LABEL: Record<string, string> = { jira: "Jira", slack: "Slack", google: "Google", microsoft: "Microsoft 365", email: "Email", epic: "Epic", outlook: "Outlook", teams: "Teams", zoom: "Zoom", servicenow: "ServiceNow" };
 
 /* ------- derivations ------- */
 
@@ -325,10 +325,10 @@ export default async function Briefing() {
     {
       id: "projects",
       kicker: "06",
-      title: "Active Workstreams",
-      watermark: "Work",
+      title: "Service lines",
+      watermark: "Units",
       tone: "var(--aligned)",
-      summary: "Active workstreams and where each one stands.",
+      summary: "The inpatient units, and where each one stands right now.",
       node: <ActiveProjects projects={projects} findings={findings} />,
     },
   ];
@@ -977,7 +977,7 @@ function ActiveProjects({ projects, findings }: { projects: Project[]; findings:
   if (projects.length === 0) {
     return (
       <EditorialEmpty
-        title="No projects mapped yet."
+        title="No service lines mapped yet."
         body={
           <>
             Connect a tool so Husn has somewhere to read from.{" "}

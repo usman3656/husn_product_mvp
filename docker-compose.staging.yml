@@ -71,6 +71,9 @@ services:
         # the staging web image MUST be built with the staging API URL or the
         # staging frontend would call the prod API.
         NEXT_PUBLIC_API_URL: https://${DOMAIN_API}
+        # Demo fixtures: unset/"mclean" => McLean demo on; set to "off" to serve
+        # live data only.
+        NEXT_PUBLIC_DEMO_TENANT: ${NEXT_PUBLIC_DEMO_TENANT:-mclean}
     restart: unless-stopped
     env_file: .env.staging
     environment:

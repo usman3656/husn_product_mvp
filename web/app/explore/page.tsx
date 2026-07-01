@@ -37,16 +37,16 @@ type ResolvedFinding = {
 type Project = { id: number; slug: string; name: string; artifact_count: number; scopes: { source: string }[] };
 type Person = { id: number; primary_name: string | null; primary_email: string | null; identities: { source: string }[] };
 
-const SOURCE_LABEL: Record<string, string> = { jira: "Jira", slack: "Slack", google: "Google", microsoft: "Microsoft" };
+const SOURCE_LABEL: Record<string, string> = { jira: "Jira", slack: "Slack", google: "Google", microsoft: "Microsoft 365", epic: "Epic", outlook: "Outlook", teams: "Teams", zoom: "Zoom", servicenow: "ServiceNow" };
 
 type Lens = "projects" | "teams" | "risks" | "ownership" | "dependencies" | "decisions" | "resolved";
 
 const LENSES: { key: Lens; label: string; tagline: string }[] = [
-  { key: "projects", label: "Projects", tagline: "Workstreams Husn is reading." },
-  { key: "teams", label: "Teams", tagline: "Who is working alongside whom." },
-  { key: "risks", label: "Risks", tagline: "What could go wrong if no one moves." },
+  { key: "projects", label: "Service lines", tagline: "The inpatient units and programs Husn is watching." },
+  { key: "teams", label: "Clinicians", tagline: "Who is working alongside whom across the units." },
+  { key: "risks", label: "Risks", tagline: "What could go wrong on the floor if no one moves." },
   { key: "ownership", label: "Ownership", tagline: "Who is responsible — and where it isn't clear." },
-  { key: "dependencies", label: "Dependencies", tagline: "What is waiting on what." },
+  { key: "dependencies", label: "Dependencies", tagline: "What is waiting on what — beds, consults, placements." },
   { key: "decisions", label: "Decisions", tagline: "What's been agreed, and where it might shift." },
   { key: "resolved", label: "Resolved", tagline: "Issues you've marked as dealt with — kept here, not deleted, and recallable." },
 ];
@@ -138,7 +138,7 @@ export default async function ExplorePage({ searchParams }: { searchParams: Prom
 
 /* ------- Project lens ------- */
 function ProjectsLens({ projects, findings }: { projects: Project[]; findings: Finding[] }) {
-  if (projects.length === 0) return <EmptyEditorial title="No projects mapped yet." body={<>Connect a tool to give Husn somewhere to read from. <Link href="/connections" style={{ color: "var(--accent)" }} className="font-medium">Open Connections →</Link></>} />;
+  if (projects.length === 0) return <EmptyEditorial title="No service lines mapped yet." body={<>Connect a tool to give Husn somewhere to read from. <Link href="/connections" style={{ color: "var(--accent)" }} className="font-medium">Open Connections →</Link></>} />;
   return (
     <ul className="grid grid-cols-1 lg:grid-cols-2 gap-3">
       {projects.map((p) => {
@@ -181,12 +181,12 @@ function ProjectsLens({ projects, findings }: { projects: Project[]; findings: F
 
 /* ------- Teams lens ------- */
 function TeamsLens({ persons }: { persons: Person[] }) {
-  if (persons.length === 0) return <EmptyEditorial title="No people resolved yet." body="They appear here as Husn reads activity across your tools." />;
+  if (persons.length === 0) return <EmptyEditorial title="No clinicians resolved yet." body="They appear here as Husn reads activity across your tools." />;
   return (
     <>
       <p className="husn-prose mb-6 max-w-[58ch]">
-        Husn resolves the same person across their Slack handle, Jira account, and email aliases.
-        Below are the people showing up in the activity Husn reads.
+        Husn resolves the same clinician across Epic, Outlook, and Teams.
+        Below are the people showing up in the activity Husn reads across the units.
       </p>
       <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
         {persons.slice(0, 24).map((p) => {

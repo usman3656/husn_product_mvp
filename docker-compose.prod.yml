@@ -66,6 +66,9 @@ services:
         # the client bundle). Setting them in `environment:` only affects the
         # runtime server-side process, not browser code.
         NEXT_PUBLIC_API_URL: https://${DOMAIN_API}
+        # Demo fixtures: unset/"mclean" => McLean demo on; set to "off" in
+        # .env.prod to serve live data only (no code change / redeploy of code).
+        NEXT_PUBLIC_DEMO_TENANT: ${NEXT_PUBLIC_DEMO_TENANT:-mclean}
     restart: unless-stopped
     env_file: .env.prod
     environment:
