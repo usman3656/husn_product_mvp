@@ -325,7 +325,7 @@ export default async function Briefing() {
     {
       id: "projects",
       kicker: "06",
-      title: "Active Projects",
+      title: "Active Workstreams",
       watermark: "Work",
       tone: "var(--aligned)",
       summary: "Active workstreams and where each one stands.",
@@ -376,10 +376,11 @@ function BriefingAwaiting({ isAdmin = false }: { isAdmin?: boolean }) {
             Connect your tools.
           </h2>
           <p className="husn-prose mt-5 max-w-[62ch]">
-            As you connect Slack, Jira, Google, and Microsoft, Husn maps the
-            work your team is already doing, surfaces conflicts and ownership
-            gaps, and writes a per-persona briefing every morning. Every claim
-            stays sourced.
+            As you connect Microsoft 365 (Outlook and OneDrive), Google
+            Workspace, and the other tools your teams already use, Husn maps the
+            coordination happening across your service lines — handoffs,
+            ownership, and what&apos;s drifting — and writes a per-role briefing
+            every morning. Every claim stays sourced.
           </p>
           <div className="mt-8 flex flex-wrap gap-2.5">
             <Link
@@ -458,7 +459,7 @@ function AwaitingPulse() {
 
 function leadIn(count: number, conf: number): string {
   if (count === 0) {
-    return "Across your tools, nothing is drifting. Husn is still reading — you'll see something here the moment that changes.";
+    return "Across your service lines and tools, nothing is drifting. Husn is still reading — you'll see something here the moment that changes.";
   }
   const c = conf >= 75 ? "calm" : conf >= 50 ? "watchful" : "demanding";
   return `The picture is ${c}. ${count === 1 ? "One concern is open" : `${count} concerns are open`}, ranked below by what costs the most if ignored — not what came in last.`;

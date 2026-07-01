@@ -102,22 +102,30 @@ export function SideNav() {
     >
       {/* Workspace mark */}
       <div className="px-5 pt-6 pb-5">
-        <Link href="/" className="flex items-center gap-2.5 group" aria-label="husn — home">
-          <span
-            aria-hidden
-            className="grid h-7 w-7 place-items-center rounded-[8px]"
-            style={{ background: "var(--text)", color: "var(--bg)" }}
-          >
-            <span className="text-[13px] font-semibold leading-none" style={{ letterSpacing: "-0.04em" }}>
-              h
+        <Link href="/" className="group block" aria-label="Husn for McLean Hospital — home">
+          <span className="flex items-center gap-2.5">
+            <span
+              aria-hidden
+              className="grid h-7 w-7 place-items-center rounded-[8px]"
+              style={{ background: "var(--text)", color: "var(--bg)" }}
+            >
+              <span className="text-[13px] font-semibold leading-none" style={{ letterSpacing: "-0.04em" }}>
+                h
+              </span>
+            </span>
+            <span className="text-[15px] font-semibold tracking-tight">husn</span>
+            <span
+              className="ml-auto text-[10.5px] font-medium px-1.5 py-0.5 rounded-full border"
+              style={{ borderColor: "var(--border)", color: "var(--muted)" }}
+            >
+              beta
             </span>
           </span>
-          <span className="text-[15px] font-semibold tracking-tight">husn</span>
           <span
-            className="ml-auto text-[10.5px] font-medium px-1.5 py-0.5 rounded-full border"
-            style={{ borderColor: "var(--border)", color: "var(--muted)" }}
+            className="mt-2 block text-[10.5px] font-medium"
+            style={{ color: "var(--muted)", letterSpacing: "0.06em" }}
           >
-            beta
+            for McLean Hospital
           </span>
         </Link>
       </div>
@@ -198,7 +206,7 @@ export function SideNav() {
         ) : null}
         <div className="flex items-center justify-between gap-3">
           <p className="text-[11.5px]" style={{ color: "var(--muted)" }}>
-            The intelligence layer.
+            Clinical coordination intelligence.
           </p>
           <ThemeToggle />
         </div>
@@ -259,7 +267,7 @@ export function MobileBar() {
       }}
     >
       <div className="flex items-center justify-between px-4 py-3">
-        <Link href="/" className="flex items-center gap-2" aria-label="husn — home">
+        <Link href="/" className="flex items-center gap-2" aria-label="Husn for McLean Hospital — home">
           <span
             aria-hidden
             className="grid h-6 w-6 place-items-center rounded-md"
@@ -268,6 +276,9 @@ export function MobileBar() {
             <span className="text-[11px] font-semibold leading-none">h</span>
           </span>
           <span className="text-[14px] font-semibold tracking-tight">husn</span>
+          <span className="text-[11px] font-medium" style={{ color: "var(--muted)" }}>
+            · McLean
+          </span>
         </Link>
         <nav className="flex items-center gap-1" aria-label="Primary">
           {PRIMARY.map((item) => (
