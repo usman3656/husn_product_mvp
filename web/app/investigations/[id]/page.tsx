@@ -53,8 +53,9 @@ async function fetchFinding(id: number): Promise<Finding | null> {
 }
 
 const SOURCE_LABEL: Record<string, string> = {
-  jira: "Jira", slack: "Slack", google: "Google", microsoft: "Microsoft 365", email: "Email",
-  epic: "Epic", outlook: "Outlook", teams: "Teams", zoom: "Zoom", servicenow: "ServiceNow",
+  slack: "Slack", google: "Google", microsoft: "Microsoft", email: "Email",
+  outlook: "Email", calendar: "Calendar", zoom: "Zoom", redcap: "REDCap",
+  irb: "IRB", drive: "Drive", era: "eRA Commons", ctms: "CTMS",
 };
 
 function timeAgo(iso: string): string {

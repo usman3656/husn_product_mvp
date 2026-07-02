@@ -37,18 +37,18 @@ type ResolvedFinding = {
 type Project = { id: number; slug: string; name: string; artifact_count: number; scopes: { source: string }[] };
 type Person = { id: number; primary_name: string | null; primary_email: string | null; identities: { source: string }[] };
 
-const SOURCE_LABEL: Record<string, string> = { jira: "Jira", slack: "Slack", google: "Google", microsoft: "Microsoft 365", epic: "Epic", outlook: "Outlook", teams: "Teams", zoom: "Zoom", servicenow: "ServiceNow" };
+const SOURCE_LABEL: Record<string, string> = { slack: "Slack", google: "Google", microsoft: "Microsoft", email: "Email", outlook: "Email", calendar: "Calendar", zoom: "Zoom", redcap: "REDCap", irb: "IRB", drive: "Drive", era: "eRA Commons", ctms: "CTMS" };
 
 type Lens = "projects" | "teams" | "risks" | "ownership" | "dependencies" | "decisions" | "resolved";
 
 const LENSES: { key: Lens; label: string; tagline: string }[] = [
-  { key: "projects", label: "Service lines", tagline: "The inpatient units and programs Husn is watching." },
-  { key: "teams", label: "Clinicians", tagline: "Who is working alongside whom across the units." },
-  { key: "risks", label: "Risks", tagline: "What could go wrong on the floor if no one moves." },
-  { key: "ownership", label: "Ownership", tagline: "Who is responsible — and where it isn't clear." },
-  { key: "dependencies", label: "Dependencies", tagline: "What is waiting on what — beds, consults, placements." },
-  { key: "decisions", label: "Decisions", tagline: "What's been agreed, and where it might shift." },
-  { key: "resolved", label: "Resolved", tagline: "Issues you've marked as dealt with — kept here, not deleted, and recallable." },
+  { key: "projects", label: "Workstreams", tagline: "The move, the trials, the grants, the summit, and hiring." },
+  { key: "teams", label: "Collaborators", tagline: "Your lab and the people you coordinate with." },
+  { key: "risks", label: "Open items", tagline: "Everything currently in motion, ranked by what stalls first." },
+  { key: "ownership", label: "Unowned", tagline: "Orphaned by the Brigham → Northwestern move." },
+  { key: "dependencies", label: "Stalled", tagline: "Waiting on one pending step to move." },
+  { key: "decisions", label: "Needs you", tagline: "The pending step is you — a call or a sign-off." },
+  { key: "resolved", label: "Resolved", tagline: "Items you've marked as dealt with — kept here, not deleted, and recallable." },
 ];
 
 const SEV_RANK = { high: 3, medium: 2, low: 1 } as const;
@@ -126,10 +126,10 @@ export default async function ExplorePage({ searchParams }: { searchParams: Prom
       <section className="mt-10 husn-rise" style={{ animationDelay: "60ms" }}>
         {lens === "projects" ? <ProjectsLens projects={projectsRes?.projects ?? []} findings={open} /> : null}
         {lens === "teams" ? <TeamsLens persons={personsRes?.persons ?? []} /> : null}
-        {lens === "risks" ? <FindingsLens items={open.filter((f) => f.rule_id !== "R-OWNER-1").sort(byConsequence)} hint="Open concerns that may cost the org something if no one moves." /> : null}
-        {lens === "ownership" ? <FindingsLens items={open.filter((f) => f.rule_id === "R-OWNER-1").sort(byConsequence)} hint="Where Husn can't tell who's responsible." /> : null}
-        {lens === "dependencies" ? <DependenciesLens items={open.filter((f) => f.rule_id.startsWith("R-DEP-"))} /> : null}
-        {lens === "decisions" ? <DecisionsLens /> : null}
+        {lens === "risks" ? <FindingsLens items={open.slice().sort(byConsequence)} hint="Everything in motion right now, ranked by what stalls first if no one moves." /> : null}
+        {lens === "ownership" ? <FindingsLens items={open.filter((f) => f.rule_id === "UNOWNED").sort(byConsequence)} hint="Items orphaned by the move — no owner at Northwestern yet." /> : null}
+        {lens === "dependencies" ? <DependenciesLens items={open.filter((f) => f.rule_id === "BLOCKED")} /> : null}
+        {lens === "decisions" ? <FindingsLens items={open.filter((f) => f.rule_id === "NEEDS-YOU").sort(byConsequence)} hint="The pending step is you — a call, an approval, a sign-off no one else can make." /> : null}
         {lens === "resolved" ? <ResolvedLens items={resolved} /> : null}
       </section>
     </main>
@@ -138,7 +138,7 @@ export default async function ExplorePage({ searchParams }: { searchParams: Prom
 
 /* ------- Project lens ------- */
 function ProjectsLens({ projects, findings }: { projects: Project[]; findings: Finding[] }) {
-  if (projects.length === 0) return <EmptyEditorial title="No service lines mapped yet." body={<>Connect a tool to give Husn somewhere to read from. <Link href="/connections" style={{ color: "var(--accent)" }} className="font-medium">Open Connections →</Link></>} />;
+  if (projects.length === 0) return <EmptyEditorial title="No workstreams mapped yet." body={<>Connect a tool to give Husn somewhere to read from. <Link href="/connections" style={{ color: "var(--accent)" }} className="font-medium">Open Connections →</Link></>} />;
   return (
     <ul className="grid grid-cols-1 lg:grid-cols-2 gap-3">
       {projects.map((p) => {
@@ -181,12 +181,12 @@ function ProjectsLens({ projects, findings }: { projects: Project[]; findings: F
 
 /* ------- Teams lens ------- */
 function TeamsLens({ persons }: { persons: Person[] }) {
-  if (persons.length === 0) return <EmptyEditorial title="No clinicians resolved yet." body="They appear here as Husn reads activity across your tools." />;
+  if (persons.length === 0) return <EmptyEditorial title="No collaborators resolved yet." body="They appear here as Husn reads activity across your tools." />;
   return (
     <>
       <p className="husn-prose mb-6 max-w-[58ch]">
-        Husn resolves the same clinician across Epic, Outlook, and Teams.
-        Below are the people showing up in the activity Husn reads across the units.
+        Husn resolves the same person across Email, Slack, and Zoom.
+        Below are your lab members and collaborators showing up in the activity Husn reads.
       </p>
       <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
         {persons.slice(0, 24).map((p) => {
@@ -309,12 +309,12 @@ function DependenciesLens({ items }: { items: Finding[] }) {
   if (items.length === 0) {
     return (
       <EmptyEditorial
-        title="No dependency conflicts surfaced."
-        body="Husn watches for blocked-by relationships across Jira and the conversations around them. None are at risk right now."
+        title="Nothing is stalled."
+        body="Husn watches for items waiting on a single pending step — an unread analysis, an unapproved amendment, an outstanding reply. None are stuck right now."
       />
     );
   }
-  return <FindingsLens items={items} hint="What's waiting on what — and where the chain is strained." />;
+  return <FindingsLens items={items} hint="Each of these is waiting on one thing to move." />;
 }
 
 /* ------- Decisions lens ------- */
