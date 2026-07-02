@@ -53,9 +53,8 @@ async function fetchFinding(id: number): Promise<Finding | null> {
 }
 
 const SOURCE_LABEL: Record<string, string> = {
-  slack: "Slack", google: "Google", microsoft: "Microsoft", email: "Email",
-  outlook: "Email", calendar: "Calendar", zoom: "Zoom", redcap: "REDCap",
-  irb: "IRB", drive: "Drive", era: "eRA Commons", ctms: "CTMS",
+  epic: "Epic", pacs: "PACS", orboard: "OR Board", pager: "Secure Chat",
+  labs: "Labs", sched: "Scheduling", slack: "Slack", email: "Email",
 };
 
 function timeAgo(iso: string): string {
@@ -68,11 +67,10 @@ function timeAgo(iso: string): string {
 }
 
 function kindLabel(rule_id: string): string {
-  if (rule_id === "NEEDS-YOU") return "Needs you";
-  if (rule_id === "UNOWNED") return "Unowned — from the move";
-  if (rule_id === "BLOCKED") return "Stalled";
-  if (rule_id === "DEADLINE") return "Deadline";
-  if (rule_id === "NOT-LANDED") return "Not yet landed";
+  if (rule_id === "EMERGENCY") return "Emergency";
+  if (rule_id === "HIGH") return "High priority";
+  if (rule_id === "PENDING") return "Pending task";
+  if (rule_id === "REQUEST") return "Request";
   if (rule_id === "R-DATE-1") return "Date conflict";
   if (rule_id === "R-OWNER-1") return "Ownership gap";
   if (rule_id === "R-STATUS-1") return "Status drift";
@@ -96,21 +94,18 @@ function reachOutContext(f: Finding): ReachOutContext {
   const k = prettyKey(f.details?.key);
   const via: "slack" | "email" = sources.includes("slack") ? "slack" : "email";
 
-  // Dr. Siddiqi (demo) categories — keep drafts consistent with the home page.
-  if (f.rule_id === "NEEDS-YOU") {
-    return { who: "You", why: f.summary, about: "Needs you", draft: "This one is yours to decide — no outreach needed.", via };
+  // Floor-surgeon (demo) categories — keep drafts consistent with the home page.
+  if (f.rule_id === "EMERGENCY") {
+    return { who: "The team on it", why: f.summary, about: "Emergency", draft: `Escalating now — need eyes on this immediately. Can you acknowledge and confirm the next step?`, via };
   }
-  if (f.rule_id === "UNOWNED") {
-    return { who: "The likely owner", why: f.summary, about: "Unowned — from the move", draft: `Quick one: who owns this at Northwestern now? Want to make sure it doesn't fall through the move.`, via };
+  if (f.rule_id === "HIGH") {
+    return { who: "Whoever can unblock it", why: f.summary, about: "High priority", draft: `Before the next case: can you clear this? It's holding up the list.`, via };
   }
-  if (f.rule_id === "BLOCKED") {
-    return { who: "Whoever can clear it", why: f.summary, about: "Stalled", draft: `Can you take the one pending step here? This is stalled on a single thing and I'd like to unblock it today.`, via };
+  if (f.rule_id === "PENDING") {
+    return { who: "The owner", why: f.summary, about: "Pending task", draft: `Closing the loop here — can you take the pending step so this doesn't slip today?`, via };
   }
-  if (f.rule_id === "DEADLINE") {
-    return { who: "The owner + grants office", why: f.summary, about: "Deadline", draft: `Flagging a hard deadline here. Can we confirm who's driving it and that we're on track?`, via };
-  }
-  if (f.rule_id === "NOT-LANDED") {
-    return { who: "The downstream site / collaborator", why: f.summary, about: "Not yet landed", draft: `Following up: the change is decided on our end — can you confirm it's landed on yours?`, via };
+  if (f.rule_id === "REQUEST") {
+    return { who: "The requester", why: f.summary, about: "Request", draft: `Got your request. Here's where I am — I'll confirm shortly.`, via };
   }
 
   if (f.rule_id === "R-DATE-1") {

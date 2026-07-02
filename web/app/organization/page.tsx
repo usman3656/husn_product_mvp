@@ -43,7 +43,7 @@ type ConnectionRow = {
   artifact_count: number;
 };
 
-const SOURCE_LABEL: Record<string, string> = { slack: "Slack", google: "Google", microsoft: "Microsoft", email: "Email", outlook: "Email", calendar: "Calendar", zoom: "Zoom", redcap: "REDCap", irb: "IRB", drive: "Drive", era: "eRA Commons", ctms: "CTMS" };
+const SOURCE_LABEL: Record<string, string> = { epic: "Epic", pacs: "PACS", orboard: "OR Board", pager: "Secure Chat", labs: "Labs", sched: "Scheduling", slack: "Slack", email: "Email" };
 
 export default async function OrganizationPage() {
   const [projectsRes, personsRes, edgesRes, findingsRes, connectionsRes] = await Promise.all([
@@ -110,17 +110,17 @@ export default async function OrganizationPage() {
       {/* Editorial header */}
       <header className="husn-rise" style={{ maxWidth: 760 }}>
         <p className="husn-eyebrow">Organization</p>
-        <h1 className="husn-display mt-4">How your operation runs.</h1>
+        <h1 className="husn-display mt-4">Your floor, mapped.</h1>
         <p className="husn-prose mt-5 max-w-[60ch]">
-          A living view of your workstreams, the people moving them, the decisions
-          in flight, and how they all connect. This is the digital twin of your
-          operation — not today&apos;s briefing, not the inbox.
+          A living view of the areas you cover, the people you work with, and how
+          they all connect. This is the digital twin of your service —
+          not today&apos;s briefing, not the inbox.
         </p>
       </header>
 
-      {/* 1. Workstreams */}
+      {/* 1. Areas */}
       <section className="mt-20 husn-rise" style={{ animationDelay: "60ms" }}>
-        <Kicker n="01" title="Workstreams" sub="The move, the trials, the grants, the summit, and hiring." />
+        <Kicker n="01" title="Areas" sub="OR, ICU, ward, ED, tumour board, and clinic." />
         {projects.length === 0 ? (
           <Empty
             title="No workstreams mapped yet."
@@ -144,7 +144,7 @@ export default async function OrganizationPage() {
 
       {/* 2. Organizational Map — People × Workstreams */}
       <section className="mt-20 husn-rise" style={{ animationDelay: "120ms" }}>
-        <Kicker n="02" title="Collaborator map" sub="How your people connect to the workstreams." />
+        <Kicker n="02" title="Care-team map" sub="How your team connects to the areas." />
         <OrgMatrix
           people={persons.map((p): MatrixPerson => ({
             id: p.id,

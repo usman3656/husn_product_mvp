@@ -37,20 +37,18 @@ type ResolvedFinding = {
 type Project = { id: number; slug: string; name: string; artifact_count: number; scopes: { source: string }[] };
 type Person = { id: number; primary_name: string | null; primary_email: string | null; identities: { source: string }[] };
 
-const SOURCE_LABEL: Record<string, string> = { slack: "Slack", google: "Google", microsoft: "Microsoft", email: "Email", outlook: "Email", calendar: "Calendar", zoom: "Zoom", redcap: "REDCap", irb: "IRB", drive: "Drive", era: "eRA Commons", ctms: "CTMS" };
+const SOURCE_LABEL: Record<string, string> = { epic: "Epic", pacs: "PACS", orboard: "OR Board", pager: "Secure Chat", labs: "Labs", sched: "Scheduling", slack: "Slack", email: "Email" };
 
-type Lens = "projects" | "teams" | "risks" | "ownership" | "dependencies" | "decisions" | "deadlines" | "landed" | "resolved";
+type Lens = "areas" | "team" | "emergencies" | "high" | "pending" | "requests" | "resolved";
 
 const LENSES: { key: Lens; label: string; tagline: string }[] = [
-  { key: "projects", label: "Workstreams", tagline: "The move, the trials, the grants, the summit, and hiring." },
-  { key: "teams", label: "Collaborators", tagline: "Your lab and the people you coordinate with." },
-  { key: "risks", label: "Open items", tagline: "Everything currently in motion, ranked by what stalls first." },
-  { key: "decisions", label: "Needs you", tagline: "The pending step is you — a call or a sign-off." },
-  { key: "ownership", label: "Unowned", tagline: "Orphaned by the Brigham → Northwestern move." },
-  { key: "dependencies", label: "Stalled", tagline: "Waiting on one pending step to move." },
-  { key: "deadlines", label: "Due soon", tagline: "Hard dates in the next two weeks — grants, IRB, the summit." },
-  { key: "landed", label: "Not yet landed", tagline: "Decided on your end; the site or a collaborator hasn't caught up." },
-  { key: "resolved", label: "Resolved", tagline: "Items you've marked as dealt with — kept here, not deleted, and recallable." },
+  { key: "areas", label: "Areas", tagline: "Where you're working — OR, ICU, ward, ED, tumour board, clinic." },
+  { key: "team", label: "Care team", tagline: "Who you're coordinating with on the floor today." },
+  { key: "emergencies", label: "Emergencies", tagline: "Act now — patient safety or the OR can't wait." },
+  { key: "high", label: "High priority", tagline: "Blocking your next case or decision." },
+  { key: "pending", label: "Pending", tagline: "What you owe before the day gets away from you." },
+  { key: "requests", label: "Requests", tagline: "Inbound — consults, pages, scheduling, family." },
+  { key: "resolved", label: "Resolved", tagline: "Handled — kept here, not deleted, and recallable." },
 ];
 
 const SEV_RANK = { high: 3, medium: 2, low: 1 } as const;
@@ -86,7 +84,7 @@ function timeAgo(iso: string | null): string {
 
 export default async function ExplorePage({ searchParams }: { searchParams: Promise<{ lens?: Lens }> }) {
   const sp = await searchParams;
-  const lens: Lens = LENSES.some((l) => l.key === sp.lens) ? (sp.lens as Lens) : "projects";
+  const lens: Lens = LENSES.some((l) => l.key === sp.lens) ? (sp.lens as Lens) : "areas";
 
   const [findingsRes, projectsRes, personsRes, resolvedRes] = await Promise.all([
     serverJson<{ items: Finding[] }>("/api/findings?status=all&limit=200"),
@@ -112,7 +110,7 @@ export default async function ExplorePage({ searchParams }: { searchParams: Prom
         {LENSES.map((l) => (
           <Link
             key={l.key}
-            href={l.key === "projects" ? "/explore" : `/explore?lens=${l.key}`}
+            href={l.key === "areas" ? "/explore" : `/explore?lens=${l.key}`}
             className="rounded-full border px-3.5 py-1.5 text-[13px] font-medium transition-colors"
             style={{
               borderColor: l.key === lens ? "var(--text)" : "var(--border)",
@@ -126,14 +124,12 @@ export default async function ExplorePage({ searchParams }: { searchParams: Prom
       </nav>
 
       <section className="mt-10 husn-rise" style={{ animationDelay: "60ms" }}>
-        {lens === "projects" ? <ProjectsLens projects={projectsRes?.projects ?? []} findings={open} /> : null}
-        {lens === "teams" ? <TeamsLens persons={personsRes?.persons ?? []} /> : null}
-        {lens === "risks" ? <FindingsLens items={open.slice().sort(byConsequence)} hint="Everything in motion right now, ranked by what stalls first if no one moves." /> : null}
-        {lens === "ownership" ? <FindingsLens items={open.filter((f) => f.rule_id === "UNOWNED").sort(byConsequence)} hint="Items orphaned by the move — no owner at Northwestern yet." /> : null}
-        {lens === "dependencies" ? <DependenciesLens items={open.filter((f) => f.rule_id === "BLOCKED")} /> : null}
-        {lens === "decisions" ? <FindingsLens items={open.filter((f) => f.rule_id === "NEEDS-YOU").sort(byConsequence)} hint="The pending step is you — a call, an approval, a sign-off no one else can make." /> : null}
-        {lens === "deadlines" ? <FindingsLens items={open.filter((f) => f.rule_id === "DEADLINE").sort(byConsequence)} hint="Fixed dates in the next two weeks. Missing one costs a cycle, not a day." /> : null}
-        {lens === "landed" ? <FindingsLens items={open.filter((f) => f.rule_id === "NOT-LANDED").sort(byConsequence)} hint="You decided it; the site or a collaborator hasn't caught up." /> : null}
+        {lens === "areas" ? <ProjectsLens projects={projectsRes?.projects ?? []} findings={open} /> : null}
+        {lens === "team" ? <TeamsLens persons={personsRes?.persons ?? []} /> : null}
+        {lens === "emergencies" ? <FindingsLens items={open.filter((f) => f.rule_id === "EMERGENCY").sort(byConsequence)} hint="Act now — patient safety or the OR can't wait." /> : null}
+        {lens === "high" ? <FindingsLens items={open.filter((f) => f.rule_id === "HIGH").sort(byConsequence)} hint="Blocking your next case or decision." /> : null}
+        {lens === "pending" ? <FindingsLens items={open.filter((f) => f.rule_id === "PENDING").sort(byConsequence)} hint="What you owe before the day gets away from you." /> : null}
+        {lens === "requests" ? <FindingsLens items={open.filter((f) => f.rule_id === "REQUEST").sort(byConsequence)} hint="Inbound — consults, pages, scheduling, and family, waiting on you." /> : null}
         {lens === "resolved" ? <ResolvedLens items={resolved} /> : null}
       </section>
     </main>
@@ -142,13 +138,15 @@ export default async function ExplorePage({ searchParams }: { searchParams: Prom
 
 /* ------- Project lens ------- */
 function ProjectsLens({ projects, findings }: { projects: Project[]; findings: Finding[] }) {
-  if (projects.length === 0) return <EmptyEditorial title="No workstreams mapped yet." body={<>Connect a tool to give Husn somewhere to read from. <Link href="/connections" style={{ color: "var(--accent)" }} className="font-medium">Open Connections →</Link></>} />;
+  if (projects.length === 0) return <EmptyEditorial title="No areas mapped yet." body={<>Connect a tool to give Husn somewhere to read from. <Link href="/connections" style={{ color: "var(--accent)" }} className="font-medium">Open Connections →</Link></>} />;
   return (
     <ul className="grid grid-cols-1 lg:grid-cols-2 gap-3">
       {projects.map((p) => {
+        // Word-boundary match so an area slug never matches inside another word.
+        const slugRe = new RegExp(`\\b${p.slug.toLowerCase()}\\b`);
         const related = findings.filter((f) =>
           Object.values(f.details?.per_source ?? {}).some((arr: unknown) =>
-            Array.isArray(arr) && (arr as { artifact_title?: string }[]).some((ev) => (ev.artifact_title ?? "").toLowerCase().includes(p.slug.toLowerCase())),
+            Array.isArray(arr) && (arr as { artifact_title?: string }[]).some((ev) => slugRe.test((ev.artifact_title ?? "").toLowerCase())),
           ),
         );
         const state = related.length === 0 ? "Quiet" : `${related.length} open ${related.length === 1 ? "concern" : "concerns"}`;
@@ -185,12 +183,12 @@ function ProjectsLens({ projects, findings }: { projects: Project[]; findings: F
 
 /* ------- Teams lens ------- */
 function TeamsLens({ persons }: { persons: Person[] }) {
-  if (persons.length === 0) return <EmptyEditorial title="No collaborators resolved yet." body="They appear here as Husn reads activity across your tools." />;
+  if (persons.length === 0) return <EmptyEditorial title="No care team resolved yet." body="They appear here as Husn reads activity across your tools." />;
   return (
     <>
       <p className="husn-prose mb-6 max-w-[58ch]">
-        Husn resolves the same person across Email, Slack, and Zoom.
-        Below are your lab members and collaborators showing up in the activity Husn reads.
+        Husn resolves the same person across Epic, the OR board, and secure chat.
+        Below are the people on the floor you&apos;re coordinating with today.
       </p>
       <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
         {persons.slice(0, 24).map((p) => {

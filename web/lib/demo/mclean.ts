@@ -1,95 +1,88 @@
 /**
- * Demo dataset — Dr. Shan Siddiqi (single-doctor ICP).
+ * Demo dataset — the floor surgeon / attending (ICP).
  *
- * Dr. Siddiqi is a research-dominant physician-scientist (neuromodulation:
- * TMS/DBS) standing up a NEW lab at Northwestern while relocating from
- * Brigham/CBCT, running multiple trials, carrying K23/R01/R21 grants, hiring a
- * team from ~zero, and running a national Brain Stimulation subspecialty
- * summit. His Husn wedge is his OPERATIONAL life — non-PHI, time-bound:
- * "what changed, who owns it, what's blocked" across the tools his team uses.
+ * The user is a surgeon on the floor all day: running multiple OR cases, doing
+ * inpatient rounds/checkups, and meeting families. Husn reconstructs — from
+ * Epic + PACS + the OR board + pager + labs — the four things he asks between
+ * cases: what's about to surprise me, what blocks my next case, what do I owe,
+ * and who's waiting on me.
  *
- * Everything here is grounded in the master briefing:
- *   /Users/bawani/idea/hopital_idea/shan_siddiqi_master_briefing.md
- * The only hard identifiers that exist in the source are the two NCT numbers
- * and the grant mechanisms; no PHI/patient data is invented.
+ * Grounded in /Users/bawani/idea/hopital_idea/deep-research-report.md
+ * (Surgeon/Attending/Resident composite workdays + the proactive-intelligence
+ * cue lists) and MCLEAN_ICP_DOSSIER.md (the real MGB/McLean systems stack:
+ * Epic/OpTime, Visage 7 PACS, Beaker LIS, Cadence). No PHI — generic
+ * bed/case labels only.
  *
- * Findings are categorised by rule_id into the four home "vitals":
- *   BLOCKED      → waiting on exactly one pending step (unread analysis, ...)
- *   DEADLINE     → a hard date in the next ~2 weeks (grant / IRB / summit)
- *   UNOWNED      → orphaned by the Brigham→Northwestern move
- *   NOT-LANDED   → decided/approved but not yet propagated downstream
- *   NEEDS-YOU    → the pending step is Dr. Siddiqi himself (a call / sign-off)
+ * Findings are categorised by rule_id into the four home "vitals", in order:
+ *   EMERGENCY → act-now, patient-safety or OR-critical
+ *   HIGH      → blocks his NEXT case or decision
+ *   PENDING   → what HE owes today
+ *   REQUEST   → inbound asks waiting on him (consults, pages, scheduling, family)
  *
  * TO DISABLE: set NEXT_PUBLIC_DEMO_TENANT to anything but "mclean" at build
- * time, or flip DEMO_ENABLED below. Off => serverJson/clientFetch hit the
- * live API unchanged.
+ * time, or flip DEMO_ENABLED below.
  */
 
 export const DEMO_ENABLED = (process.env.NEXT_PUBLIC_DEMO_TENANT ?? "mclean") === "mclean";
 
-/** ISO timestamp `mins` minutes before now (fresh per request so "opened 3h
- *  ago" and the deadline framing stay live). */
 function ago(mins: number): string {
   return new Date(Date.now() - mins * 60_000).toISOString();
 }
 
-/* ------------------------------------------------------------- workstreams */
-/* "projects" in the data model == his operational workstreams. Slugs are
- * single tokens so the finding→workstream title-substring match lights up. */
+/* --------------------------------------------------------------- floor areas */
+/* "projects" == the areas the surgeon moves between. Slugs are unique tokens
+ * (word-boundary matched) that prefix each evidence title. */
 const PROJECTS = [
-  { id: 1, slug: "northwestern", name: "Northwestern Lab Launch", artifact_count: 214,
-    scopes: [{ source: "outlook", kind: "thread", id: "move" }, { source: "calendar", kind: "cal", id: "move" }] },
-  { id: 2, slug: "hiring", name: "Lab Hiring — RA · Lab Manager · Neuroimaging Faculty", artifact_count: 88,
-    scopes: [{ source: "outlook", kind: "thread", id: "hiring" }, { source: "slack", kind: "channel", id: "hiring" }] },
-  { id: 3, slug: "tms", name: "Symptom-Specific TMS Trial (NCT04604210)", artifact_count: 176,
-    scopes: [{ source: "redcap", kind: "project", id: "NCT04604210" }, { source: "irb", kind: "protocol", id: "tms" }] },
-  { id: 4, slug: "tbi", name: "TBI-Depression rTMS Trial (NCT02980484)", artifact_count: 132,
-    scopes: [{ source: "ctms", kind: "study", id: "NCT02980484" }, { source: "irb", kind: "protocol", id: "tbi" }] },
-  { id: 5, slug: "grants", name: "Grant Portfolio — K23 · R01 · R21", artifact_count: 143,
-    scopes: [{ source: "era", kind: "portfolio", id: "grants" }, { source: "calendar", kind: "cal", id: "grants" }] },
-  { id: 6, slug: "summit", name: "Brain Stimulation Subspecialty Summit", artifact_count: 121,
-    scopes: [{ source: "zoom", kind: "meetings", id: "summit" }, { source: "outlook", kind: "thread", id: "summit" }] },
-  { id: 7, slug: "collaborators", name: "Collaborator & Cross-Clinic Sync", artifact_count: 97,
-    scopes: [{ source: "outlook", kind: "thread", id: "collab" }, { source: "zoom", kind: "meetings", id: "collab" }] },
+  { id: 1, slug: "theatre", name: "Operating Room", artifact_count: 143,
+    scopes: [{ source: "orboard", kind: "board", id: "or" }, { source: "epic", kind: "optime", id: "or" }] },
+  { id: 2, slug: "icu", name: "ICU / Critical Care", artifact_count: 96,
+    scopes: [{ source: "epic", kind: "unit", id: "icu" }, { source: "pager", kind: "escalation", id: "icu" }] },
+  { id: 3, slug: "ward", name: "Inpatient Ward", artifact_count: 211,
+    scopes: [{ source: "epic", kind: "unit", id: "ward" }, { source: "labs", kind: "results", id: "ward" }] },
+  { id: 4, slug: "ed", name: "ED Consults", artifact_count: 64,
+    scopes: [{ source: "pager", kind: "consult", id: "ed" }, { source: "pacs", kind: "imaging", id: "ed" }] },
+  { id: 5, slug: "mdt", name: "Tumour Board / MDT", artifact_count: 58,
+    scopes: [{ source: "labs", kind: "pathology", id: "mdt" }, { source: "epic", kind: "conference", id: "mdt" }] },
+  { id: 6, slug: "clinic", name: "Post-op Clinic", artifact_count: 72,
+    scopes: [{ source: "sched", kind: "clinic", id: "clinic" }, { source: "epic", kind: "followup", id: "clinic" }] },
+  { id: 7, slug: "family", name: "Family Meetings", artifact_count: 39,
+    scopes: [{ source: "epic", kind: "note", id: "family" }, { source: "pager", kind: "message", id: "family" }] },
 ];
 
-/* --------------------------------------------------------- lab & collaborators */
+/* -------------------------------------------------------------- the care team */
 function person(id: number, name: string, email: string, sources: string[]) {
-  return {
-    id, primary_name: name, primary_email: email,
-    identities: sources.map((source) => ({ source, display_name: name, email })),
-  };
+  return { id, primary_name: name, primary_email: email,
+    identities: sources.map((source) => ({ source, display_name: name, email })) };
 }
 const PERSONS = [
-  person(1, "Michael Fox, MD, PhD — Mentor (CBCT)", "michael.fox@bwh.harvard.edu", ["outlook", "slack"]),
-  person(2, "Samantha Baldi, PhD — Postdoc · target-engagement lead", "samantha.baldi@bwh.harvard.edu", ["redcap", "slack", "outlook"]),
-  person(3, "Joe Taylor, MD, PhD — Clinical research fellow", "joe.taylor@bwh.harvard.edu", ["redcap", "outlook"]),
-  person(4, "Suyeong Lee — Preclinical (Alzheimer's) lead", "suyeong.lee@bwh.harvard.edu", ["redcap", "slack"]),
-  person(5, "Christopher Lin — Research staff", "christopher.lin@bwh.harvard.edu", ["drive", "slack"]),
-  person(6, "Summer Frandsen — Research staff", "summer.frandsen@bwh.harvard.edu", ["drive", "outlook"]),
-  person(7, "Amir Khosravani — Postdoc", "amir.khosravani@bwh.harvard.edu", ["redcap", "slack"]),
-  person(8, "Jae Kwon — Postdoc", "jae.kwon@bwh.harvard.edu", ["redcap", "slack"]),
-  person(9, "Anna Webler — Postdoc", "anna.webler@bwh.harvard.edu", ["drive", "slack"]),
-  person(10, "Dr. Pines — Junior faculty", "pines@bwh.harvard.edu", ["outlook", "redcap"]),
-  person(11, "Dr. Makhlouf — Junior faculty", "makhlouf@bwh.harvard.edu", ["outlook", "slack"]),
-  person(12, "Nolan Williams, MD — Stanford SAINT (collaborator)", "nolan.williams@stanford.edu", ["zoom", "outlook"]),
-  person(13, "Grants Administrator — Feinberg", "grants.admin@northwestern.edu", ["era", "outlook"]),
-  person(14, "IRB Coordinator — Brigham", "irb.coordinator@bwh.harvard.edu", ["irb", "outlook"]),
+  person(1, "Chief Resident", "chief.resident@mgb.org", ["epic", "pager"]),
+  person(2, "Junior Resident", "junior.resident@mgb.org", ["epic", "pager"]),
+  person(3, "Anaesthesiologist", "anaesthesia@mgb.org", ["epic", "orboard"]),
+  person(4, "OR Scrub Nurse", "or.scrub@mgb.org", ["orboard"]),
+  person(5, "Charge Nurse — Ward", "charge.nurse@mgb.org", ["epic", "pager"]),
+  person(6, "PACU Nurse", "pacu.nurse@mgb.org", ["orboard", "epic"]),
+  person(7, "Dr. Reyes — ICU Intensivist", "reyes@mgb.org", ["epic", "pager"]),
+  person(8, "Dr. Okafor — Cardiology", "okafor@mgb.org", ["epic", "pager"]),
+  person(9, "Dr. Hahn — Radiology", "hahn@mgb.org", ["pacs", "epic"]),
+  person(10, "Dr. Silva — Pathology", "silva@mgb.org", ["labs", "epic"]),
+  person(11, "Case Manager / Social Work", "case.mgmt@mgb.org", ["epic", "pager"]),
+  person(12, "OR Board Coordinator", "or.board@mgb.org", ["orboard", "sched"]),
+  person(13, "Transport", "transport@mgb.org", ["pager"]),
+  person(14, "Blood Bank / Transfusion", "blood.bank@mgb.org", ["epic", "labs"]),
 ];
 
 function edge(person_id: number, project_id: number, total: number, dominant_role: string) {
   return { person_id, project_id, total, dominant_role };
 }
 const EDGES = [
-  edge(1, 1, 24, "author"), edge(1, 7, 18, "mention"),
-  edge(2, 3, 33, "author"), edge(2, 1, 9, "mention"),
-  edge(3, 3, 21, "assignee"), edge(3, 4, 12, "mention"),
-  edge(4, 4, 27, "author"), edge(4, 5, 8, "mention"),
-  edge(7, 3, 16, "assignee"), edge(8, 4, 14, "assignee"), edge(9, 6, 11, "mention"),
-  edge(10, 5, 13, "author"), edge(11, 6, 15, "author"),
-  edge(12, 7, 19, "author"), edge(12, 3, 7, "mention"),
-  edge(13, 5, 22, "assignee"), edge(14, 3, 17, "assignee"), edge(14, 4, 12, "assignee"),
-  edge(5, 2, 10, "author"), edge(6, 6, 9, "assignee"),
+  edge(1, 3, 34, "author"), edge(1, 1, 18, "assignee"),
+  edge(2, 3, 27, "assignee"),
+  edge(3, 1, 29, "author"), edge(4, 1, 16, "assignee"),
+  edge(5, 3, 31, "author"), edge(6, 1, 14, "assignee"),
+  edge(7, 2, 33, "author"), edge(13, 2, 9, "mention"),
+  edge(8, 3, 21, "mention"), edge(9, 3, 19, "author"), edge(9, 1, 8, "mention"),
+  edge(10, 5, 24, "author"), edge(11, 3, 22, "assignee"), edge(11, 7, 12, "assignee"),
+  edge(12, 1, 20, "author"), edge(14, 1, 11, "watcher"),
 ];
 
 /* -------------------------------------------------------------- coordination */
@@ -98,15 +91,10 @@ type Ev = {
   value_norm: string; value: string; confidence: number; extractor_id: string;
   source_anchor: { kind: "field" | "span"; field_path?: string; snippet?: string; artifact_id?: number };
 };
-function ev(
-  src: string, kind: string, claim_id: number, artifact_id: number,
-  artifact_kind: string, artifact_title: string, value: string, confidence: number, snippet: string,
-): Ev {
-  return {
-    claim_id, artifact_id, artifact_kind, artifact_title,
-    value_norm: value, value, confidence, extractor_id: `${src}.${kind}`,
-    source_anchor: { kind: "span", snippet, artifact_id },
-  };
+function ev(src: string, kind: string, claim_id: number, artifact_id: number,
+  artifact_kind: string, artifact_title: string, value: string, confidence: number, snippet: string): Ev {
+  return { claim_id, artifact_id, artifact_kind, artifact_title, value_norm: value, value, confidence,
+    extractor_id: `${src}.${kind}`, source_anchor: { kind: "span", snippet, artifact_id } };
 }
 
 type Finding = {
@@ -116,170 +104,184 @@ type Finding = {
   opened_at: string; closed_at: string | null;
 };
 
-/* Each finding.summary is a full one-line proactive alert (the doctor reads the
- * alert, not a terse title). rule_id = the home vital it rolls up into. */
+/* Each summary is one terse, time-stamped, sourced alert (surgeon voice).
+ * artifact_title is prefixed with the area slug for workstream attribution. */
 function buildFindings(): Finding[] {
   return [
-    /* ---------------- NEEDS-YOU (the pending step is him) ---------------- */
+    /* ---------------- EMERGENCY (act now) ---------------- */
     {
-      id: 101, rule_id: "NEEDS-YOU", status: "open", severity: "high",
-      summary: "The RA search for the Northwestern lab has two candidate replies waiting on your decision.",
-      details: { kind: "decision", key: "hiring/ra_reply", distinct_values: ["2 replies waiting", "no decision yet"], per_source: {
-        outlook: [ev("outlook", "decision", 5101, 9101, "email", "hiring — RA candidate replies (Email)", "2 replies waiting", 1.0, "two candidates responded; both need a yes/no from you")],
-        slack: [ev("slack", "decision", 5102, 9102, "message", "hiring — #lab-hiring thread (Slack)", "no decision yet", 0.7, "waiting on Shan to pick who to bring in for a call")],
+      id: 101, rule_id: "EMERGENCY", status: "open", severity: "high",
+      summary: "Rapid response on Bed 7 (post-op day 1): respiratory therapy acknowledged, ICU triage has NOT — last lactate drawn 14 min ago.",
+      details: { kind: "emergency", key: "emergency/rapid_response", distinct_values: ["RT acknowledged", "ICU not acknowledged"], per_source: {
+        pager: [ev("pager", "emergency", 5101, 9101, "page", "icu: Bed 7 rapid response (Secure Chat)", "ICU not acknowledged", 1.0, "RT ack'd; ICU triage no response yet")],
+        labs: [ev("labs", "emergency", 5102, 9102, "result", "icu: Bed 7 lactate (Labs)", "lactate 14 min ago", 0.9, "last lactate resulted 14 min ago, trending up")],
       } },
-      opened_at: ago(90), closed_at: null,
+      opened_at: ago(14), closed_at: null,
     },
     {
-      id: 102, rule_id: "NEEDS-YOU", status: "open", severity: "medium",
-      summary: "The K23 budget justification needs your sign-off before Feinberg's grants office can submit.",
-      details: { kind: "decision", key: "grants/k23_signoff", distinct_values: ["awaiting PI sign-off"], per_source: {
-        era: [ev("era", "decision", 5103, 9103, "form", "grants — K23 budget justification (eRA)", "awaiting PI sign-off", 1.0, "budget justification drafted; PI approval outstanding")],
-        outlook: [ev("outlook", "decision", 5104, 9104, "email", "grants — Feinberg grants office (Email)", "awaiting PI sign-off", 0.8, "we can submit as soon as you approve the justification")],
+      id: 102, rule_id: "EMERGENCY", status: "open", severity: "high",
+      summary: "Critical potassium on Bed 12 posted after rounds — still not acknowledged by your service.",
+      details: { kind: "emergency", key: "emergency/critical_lab", distinct_values: ["critical K+ resulted", "unacknowledged"], per_source: {
+        labs: [ev("labs", "emergency", 5103, 9103, "result", "ward: Bed 12 potassium (Labs)", "critical K+ resulted", 1.0, "critical value flagged, posted 09:52 after rounds")],
+        epic: [ev("epic", "emergency", 5104, 9104, "inbasket", "ward: Bed 12 in-basket (Epic)", "unacknowledged", 0.8, "no acknowledgement from ordering service")],
       } },
-      opened_at: ago(6 * 60), closed_at: null,
-    },
-    /* ---------------- UNOWNED (orphaned by the move) ---------------- */
-    {
-      id: 103, rule_id: "UNOWNED", status: "open", severity: "high",
-      summary: "IRB continuing review for NCT04604210 has no Northwestern owner — it was held by the Brigham coordinator.",
-      details: { kind: "move", key: "move/irb_owner", distinct_values: ["Brigham coordinator", "no NU owner"], per_source: {
-        irb: [ev("irb", "move", 5105, 9105, "record", "tms — IRB continuing review (Brigham)", "Brigham coordinator", 1.0, "continuing review owner: Brigham IRB coordinator")],
-        outlook: [ev("outlook", "move", 5106, 9106, "email", "tms — transition thread (Email)", "no NU owner", 0.7, "nobody at Northwestern has picked this up yet")],
-      } },
-      opened_at: ago(20 * 60), closed_at: null,
+      opened_at: ago(38), closed_at: null,
     },
     {
-      id: 104, rule_id: "UNOWNED", status: "open", severity: "high",
-      summary: "NCT02980484 still lists Brigham as site of record while the lab relocates — the PI-of-record handoff is unconfirmed.",
-      details: { kind: "move", key: "move/site_record", distinct_values: ["Brigham site of record", "Northwestern pending"], per_source: {
-        ctms: [ev("ctms", "move", 5107, 9107, "study", "tbi — study site record", "Brigham site of record", 1.0, "site of record: Brigham and Women's")],
-        outlook: [ev("outlook", "move", 5108, 9108, "email", "tbi — site transfer thread (Email)", "Northwestern pending", 0.7, "transfer to Feinberg discussed, not yet filed")],
+      id: 103, rule_id: "EMERGENCY", status: "open", severity: "high",
+      summary: "OR-2 turnover is blocked on blood availability, not room cleaning — the colon resection can't start until 2 units are released.",
+      details: { kind: "emergency", key: "emergency/or_blood", distinct_values: ["room ready", "blood not released"], per_source: {
+        orboard: [ev("orboard", "emergency", 5105, 9105, "board", "theatre: OR-2 turnover (OR Board)", "room ready", 1.0, "room cleaned; case flagged not-ready")],
+        epic: [ev("epic", "emergency", 5106, 9106, "order", "theatre: OR-2 transfusion order (Epic)", "blood not released", 0.9, "2 units not yet released by transfusion medicine")],
       } },
-      opened_at: ago(28 * 60), closed_at: null,
+      opened_at: ago(25), closed_at: null,
+    },
+    /* ---------------- HIGH PRIORITY (blocks the next case) ---------------- */
+    {
+      id: 104, rule_id: "HIGH", status: "open", severity: "high",
+      summary: "First case (OR-1, lap chole) is missing the outside imaging import — the CT is in the chart but not in the PACS viewer you mark the target in.",
+      details: { kind: "high", key: "high/imaging_import", distinct_values: ["CT in chart", "not in PACS viewer"], per_source: {
+        epic: [ev("epic", "high", 5107, 9107, "media", "theatre: OR-1 outside CT (Epic)", "CT in chart", 1.0, "outside CT attached to the chart")],
+        pacs: [ev("pacs", "high", 5108, 9108, "study", "theatre: OR-1 PACS viewer (PACS)", "not in PACS viewer", 0.9, "study hasn't imported into Visage")],
+      } },
+      opened_at: ago(55), closed_at: null,
     },
     {
-      id: 105, rule_id: "UNOWNED", status: "open", severity: "medium",
-      summary: "R01 'two-R01' PRODEP effort and budget still route to Brigham post-move — the allocation is unreconciled between institutions.",
-      details: { kind: "move", key: "move/prodep_alloc", distinct_values: ["Brigham allocation", "Northwestern unreconciled"], per_source: {
-        era: [ev("era", "move", 5109, 9109, "record", "grants — PRODEP R01 effort (eRA)", "Brigham allocation", 1.0, "effort still committed at prior institution")],
-        outlook: [ev("outlook", "move", 5110, 9110, "email", "grants — grants admin thread (Email)", "Northwestern unreconciled", 0.7, "need to re-split effort once the move is official")],
+      id: 105, rule_id: "HIGH", status: "open", severity: "high",
+      summary: "Post-op ICU bed for case 3 is not guaranteed — the bed you're counting on is forecast to stay occupied.",
+      details: { kind: "high", key: "high/icu_bed", distinct_values: ["case 3 needs ICU", "bed forecast occupied"], per_source: {
+        orboard: [ev("orboard", "high", 5109, 9109, "board", "theatre: case 3 post-op plan (OR Board)", "case 3 needs ICU", 1.0, "case 3 requires a guaranteed ICU bed")],
+        epic: [ev("epic", "high", 5110, 9110, "bed", "icu: bed forecast (Epic)", "bed forecast occupied", 0.8, "target bed forecast occupied through the afternoon")],
       } },
-      opened_at: ago(30 * 60), closed_at: null,
+      opened_at: ago(70), closed_at: null,
     },
     {
-      id: 106, rule_id: "UNOWNED", status: "open", severity: "medium",
-      summary: "Baldi's target-engagement analysis has no confirmed owner if she doesn't relocate — the study could be orphaned.",
-      details: { kind: "move", key: "move/baldi_owner", distinct_values: ["Baldi (relocation unclear)", "no backup owner"], per_source: {
-        redcap: [ev("redcap", "move", 5111, 9111, "project", "tms — target-engagement analysis (REDCap)", "Baldi (relocation unclear)", 1.0, "sole analyst; relocation not decided")],
-        slack: [ev("slack", "move", 5112, 9112, "message", "tms — #tms-analysis (Slack)", "no backup owner", 0.6, "nobody else is set up to run this if Sam stays")],
-      } },
-      opened_at: ago(34 * 60), closed_at: null,
-    },
-    /* ---------------- BLOCKED (waiting on one step) ---------------- */
-    {
-      id: 107, rule_id: "BLOCKED", status: "open", severity: "high",
-      summary: "The target-engagement results are blocked on an imaging-QC output nobody has opened in 6 days.",
-      details: { kind: "blocked", key: "blocked/imaging_qc", distinct_values: ["QC ready", "unopened 6 days"], per_source: {
-        drive: [ev("drive", "blocked", 5113, 9113, "file", "tms — imaging QC report (Drive)", "QC ready", 1.0, "QC output posted 6 days ago")],
-        redcap: [ev("redcap", "blocked", 5114, 9114, "project", "tms — analysis pipeline (REDCap)", "unopened 6 days", 0.8, "downstream analysis paused pending QC review")],
-      } },
-      opened_at: ago(45), closed_at: null,
-    },
-    {
-      id: 108, rule_id: "BLOCKED", status: "open", severity: "medium",
-      summary: "Lab-manager onboarding (IRB delegation, REDCap access) is blocked on the unfilled seat — the offer has been out 6 days.",
-      details: { kind: "blocked", key: "blocked/labmgr_offer", distinct_values: ["offer outstanding 6 days", "onboarding blocked"], per_source: {
-        outlook: [ev("outlook", "blocked", 5115, 9115, "email", "hiring — lab manager offer (Email)", "offer outstanding 6 days", 1.0, "candidate hasn't accepted; offer sent 6 days ago")],
-        irb: [ev("irb", "blocked", 5116, 9116, "record", "hiring — IRB delegation queue (IRB)", "onboarding blocked", 0.7, "IRB delegation waits on a named lab manager")],
+      id: 106, rule_id: "HIGH", status: "open", severity: "medium",
+      summary: "Consultant recommended Bed 9 for surgery, but anaesthesia hasn't assessed the patient yet.",
+      details: { kind: "high", key: "high/anaesthesia", distinct_values: ["surgery recommended", "anaesthesia not assessed"], per_source: {
+        epic: [ev("epic", "high", 5111, 9111, "consult", "ward: Bed 9 surgical consult (Epic)", "surgery recommended", 1.0, "consultant recommends operative management")],
+        pager: [ev("pager", "high", 5112, 9112, "page", "ward: Bed 9 anaesthesia (Secure Chat)", "anaesthesia not assessed", 0.7, "no pre-op assessment logged")],
       } },
       opened_at: ago(5 * 60), closed_at: null,
     },
-    /* ---------------- DEADLINE (hard date, ≤ 2 weeks) ---------------- */
     {
-      id: 109, rule_id: "DEADLINE", status: "open", severity: "high",
-      summary: "The K23 non-competing renewal / progress report is due in 9 days and the transfer paperwork isn't started.",
-      details: { kind: "deadline", key: "deadline/k23_report", distinct_values: ["due in 9 days", "not started"], per_source: {
-        era: [ev("era", "deadline", 5117, 9117, "record", "grants — K23 progress report (eRA)", "due in 9 days", 1.0, "RPPR due date is 9 days out")],
-        calendar: [ev("calendar", "deadline", 5118, 9118, "event", "grants — deadline calendar", "not started", 0.8, "no draft on the shared drive yet")],
+      id: 107, rule_id: "HIGH", status: "open", severity: "medium",
+      summary: "Radiology finalized a changed CT impression on Bed 12 — your team hasn't opened it before rounds.",
+      details: { kind: "high", key: "high/revised_read", distinct_values: ["impression revised", "not opened"], per_source: {
+        pacs: [ev("pacs", "high", 5113, 9113, "report", "ward: Bed 12 CT read (PACS)", "impression revised", 1.0, "final impression differs from preliminary")],
+        epic: [ev("epic", "high", 5114, 9114, "note", "ward: Bed 12 chart (Epic)", "not opened", 0.7, "revised read not yet opened by the team")],
       } },
       opened_at: ago(3 * 60), closed_at: null,
     },
     {
-      id: 110, rule_id: "DEADLINE", status: "open", severity: "medium",
-      summary: "An R21 milestone deadline is 12 days out with no assigned owner since the move.",
-      details: { kind: "deadline", key: "deadline/r21_milestone", distinct_values: ["due in 12 days", "no owner"], per_source: {
-        era: [ev("era", "deadline", 5119, 9119, "record", "grants — R21 milestone (eRA)", "due in 12 days", 1.0, "milestone report window opens now")],
-        calendar: [ev("calendar", "deadline", 5120, 9120, "event", "grants — deadline calendar", "no owner", 0.7, "driver rotated out with the move")],
+      id: 108, rule_id: "HIGH", status: "open", severity: "medium",
+      summary: "Tumour-board (colon) packet lacks final pathology sign-out; the genomic report is sitting in an external portal.",
+      details: { kind: "high", key: "high/path_signout", distinct_values: ["pathology pending", "genomics external"], per_source: {
+        labs: [ev("labs", "high", 5115, 9115, "pathology", "mdt: colon case pathology (Labs)", "pathology pending", 1.0, "final sign-out not yet released")],
+        epic: [ev("epic", "high", 5116, 9116, "conference", "mdt: colon case packet (Epic)", "genomics external", 0.7, "genomic report in an outside portal")],
       } },
-      opened_at: ago(9 * 60), closed_at: null,
+      opened_at: ago(6 * 60), closed_at: null,
+    },
+    /* ---------------- PENDING (what he owes) ---------------- */
+    {
+      id: 109, rule_id: "PENDING", status: "open", severity: "high",
+      summary: "Bed 3 discharge order is signed, but home-oxygen approval is still pending and the SNF packet is incomplete.",
+      details: { kind: "pending", key: "pending/discharge_barrier", distinct_values: ["order signed", "oxygen/SNF pending"], per_source: {
+        epic: [ev("epic", "pending", 5117, 9117, "order", "ward: Bed 3 discharge order (Epic)", "order signed", 1.0, "discharge order signed")],
+        pager: [ev("pager", "pending", 5118, 9118, "message", "ward: Bed 3 case management (Secure Chat)", "oxygen/SNF pending", 0.8, "home-oxygen approval pending, SNF packet incomplete")],
+      } },
+      opened_at: ago(2 * 60), closed_at: null,
     },
     {
-      id: 111, rule_id: "DEADLINE", status: "open", severity: "medium",
-      summary: "The Brain Stimulation Summit accreditation filing closes in 8 days and the volunteer owner is ambiguous.",
-      details: { kind: "deadline", key: "deadline/summit_filing", distinct_values: ["closes in 8 days", "owner ambiguous"], per_source: {
-        zoom: [ev("zoom", "deadline", 5121, 9121, "meeting", "summit — organizer sync (Zoom)", "closes in 8 days", 0.8, "accreditation filing window closes next week")],
-        outlook: [ev("outlook", "deadline", 5122, 9122, "email", "summit — volunteers thread (Email)", "owner ambiguous", 0.7, "unclear which volunteer is filing")],
+      id: 110, rule_id: "PENDING", status: "open", severity: "medium",
+      summary: "The rounds decision to hold anticoagulation on Bed 11 never reached pharmacy.",
+      details: { kind: "pending", key: "pending/anticoag", distinct_values: ["hold decided at rounds", "pharmacy unaware"], per_source: {
+        epic: [ev("epic", "pending", 5119, 9119, "note", "ward: Bed 11 rounds note (Epic)", "hold decided at rounds", 1.0, "team agreed to hold anticoagulation")],
+        pager: [ev("pager", "pending", 5120, 9120, "message", "ward: Bed 11 pharmacy (Secure Chat)", "pharmacy unaware", 0.7, "no order change reached pharmacy")],
       } },
-      opened_at: ago(26 * 60), closed_at: null,
-    },
-    /* ---------------- NOT-LANDED (decided, not propagated) ---------------- */
-    {
-      id: 112, rule_id: "NOT-LANDED", status: "open", severity: "high",
-      summary: "The NCT04604210 IRB amendment is approved but hasn't reached the site visit calendar yet.",
-      details: { kind: "landed", key: "landed/amendment_calendar", distinct_values: ["IRB approved", "calendar unchanged"], per_source: {
-        irb: [ev("irb", "landed", 5123, 9123, "record", "tms — IRB amendment approval (IRB)", "IRB approved", 1.0, "amendment approved Monday")],
-        redcap: [ev("redcap", "landed", 5124, 9124, "project", "tms — visit calendar (REDCap)", "calendar unchanged", 0.8, "visit windows still reflect the old protocol")],
-      } },
-      opened_at: ago(50), closed_at: null,
+      opened_at: ago(4 * 60), closed_at: null,
     },
     {
-      id: 113, rule_id: "NOT-LANDED", status: "open", severity: "medium",
-      summary: "The accelerated-TMS (AI4) targeting change hasn't been acknowledged by the Stanford SAINT collaborator.",
-      details: { kind: "landed", key: "landed/ai4_ack", distinct_values: ["change sent", "no acknowledgement"], per_source: {
-        outlook: [ev("outlook", "landed", 5125, 9125, "email", "collaborators — AI4 targeting update (Email)", "change sent", 1.0, "targeting change emailed to SAINT")],
-        zoom: [ev("zoom", "landed", 5126, 9126, "meeting", "collaborators — SAINT sync (Zoom)", "no acknowledgement", 0.6, "not confirmed on the last call")],
+      id: 111, rule_id: "PENDING", status: "open", severity: "medium",
+      summary: "Last week's tumour-board recommendation (operate vs. defer biopsy) still hasn't become a scheduled OR action.",
+      details: { kind: "pending", key: "pending/mdt_action", distinct_values: ["recommendation made", "not scheduled"], per_source: {
+        epic: [ev("epic", "pending", 5121, 9121, "conference", "mdt: recommendation (Epic)", "recommendation made", 1.0, "board recommended operative plan")],
+        sched: [ev("sched", "pending", 5122, 9122, "schedule", "mdt: OR scheduling (Scheduling)", "not scheduled", 0.7, "no OR action booked yet")],
       } },
-      opened_at: ago(40 * 60), closed_at: null,
+      opened_at: ago(30 * 60), closed_at: null,
     },
     {
-      id: 114, rule_id: "NOT-LANDED", status: "open", severity: "low",
-      summary: "An updated SOP hasn't propagated to the cross-clinic collaborators (BPN, McLean, Brigham).",
-      details: { kind: "landed", key: "landed/sop_propagation", distinct_values: ["SOP updated", "sites unaware"], per_source: {
-        drive: [ev("drive", "landed", 5127, 9127, "file", "collaborators — updated SOP (Drive)", "SOP updated", 1.0, "SOP revised on the shared drive")],
-        outlook: [ev("outlook", "landed", 5128, 9128, "email", "collaborators — sites distribution (Email)", "sites unaware", 0.6, "no acknowledgement logged from downstream sites")],
+      id: 112, rule_id: "PENDING", status: "open", severity: "medium",
+      summary: "PACU handoff for case 1 is pending — PACU has the procedure, not the intra-op concern that changes overnight monitoring.",
+      details: { kind: "pending", key: "pending/pacu_handoff", distinct_values: ["procedure known", "intra-op concern missing"], per_source: {
+        orboard: [ev("orboard", "pending", 5123, 9123, "board", "theatre: case 1 PACU handoff (OR Board)", "procedure known", 1.0, "PACU has the procedure")],
+        pager: [ev("pager", "pending", 5124, 9124, "message", "theatre: case 1 handoff note (Secure Chat)", "intra-op concern missing", 0.7, "intra-op monitoring concern not conveyed")],
+      } },
+      opened_at: ago(80), closed_at: null,
+    },
+    {
+      id: 113, rule_id: "PENDING", status: "open", severity: "low",
+      summary: "A room opens for the revised 14:00 start, but scrub coverage for that slot isn't confirmed.",
+      details: { kind: "pending", key: "pending/scrub_cover", distinct_values: ["room available", "scrub unconfirmed"], per_source: {
+        orboard: [ev("orboard", "pending", 5125, 9125, "board", "theatre: 14:00 room (OR Board)", "room available", 1.0, "room opens for the revised start")],
+        sched: [ev("sched", "pending", 5126, 9126, "staffing", "theatre: scrub coverage (Scheduling)", "scrub unconfirmed", 0.6, "scrub coverage for 14:00 not confirmed")],
       } },
       opened_at: ago(52 * 60), closed_at: null,
     },
-    /* ---------------- closed (auto-reconverged; shown in Explore → all) ---- */
+    /* ---------------- REQUEST (inbound, waiting on him) ---------------- */
     {
-      id: 90, rule_id: "NOT-LANDED", status: "closed", severity: "medium",
-      summary: "summit — speaker confirmations reconciled across email and Zoom invites.",
-      details: { kind: "landed", key: "landed/summit_speakers", distinct_values: ["reconciled"], per_source: {
-        outlook: [ev("outlook", "landed", 5090, 9090, "email", "summit — speaker confirmations (Email)", "reconciled", 1.0, "invites and email list now match")],
+      id: 114, rule_id: "REQUEST", status: "open", severity: "medium",
+      summary: "Family for Bed 3 is asking for an update — the decision-maker / spokesperson isn't documented in the chart.",
+      details: { kind: "request", key: "request/family_update", distinct_values: ["family asking", "spokesperson undocumented"], per_source: {
+        pager: [ev("pager", "request", 5127, 9127, "message", "family: Bed 3 family request (Secure Chat)", "family asking", 1.0, "family requesting an update")],
+        epic: [ev("epic", "request", 5128, 9128, "note", "family: Bed 3 chart (Epic)", "spokesperson undocumented", 0.7, "no decision-maker recorded")],
+      } },
+      opened_at: ago(45), closed_at: null,
+    },
+    {
+      id: 115, rule_id: "REQUEST", status: "open", severity: "medium",
+      summary: "ED is paging for disposition on a query-appendicitis consult — outside imaging is referenced but not yet in your viewer.",
+      details: { kind: "request", key: "request/ed_consult", distinct_values: ["ED disposition page", "imaging not in viewer"], per_source: {
+        pager: [ev("pager", "request", 5129, 9129, "page", "ed: query appendicitis (Secure Chat)", "ED disposition page", 1.0, "ED paging for surgical disposition")],
+        pacs: [ev("pacs", "request", 5130, 9130, "study", "ed: outside imaging (PACS)", "imaging not in viewer", 0.7, "referenced CT not imported")],
+      } },
+      opened_at: ago(30), closed_at: null,
+    },
+    {
+      id: 116, rule_id: "REQUEST", status: "open", severity: "low",
+      summary: "Scheduling is asking you to confirm the operative-plan change from tumour board — scheduling, anaesthesia, and family comms aren't aligned yet.",
+      details: { kind: "request", key: "request/plan_confirm", distinct_values: ["confirmation requested", "not aligned"], per_source: {
+        sched: [ev("sched", "request", 5131, 9131, "schedule", "clinic: operative-plan change (Scheduling)", "confirmation requested", 1.0, "scheduling asking to confirm the change")],
+        epic: [ev("epic", "request", 5132, 9132, "note", "clinic: plan alignment (Epic)", "not aligned", 0.6, "anaesthesia and family comms not aligned")],
+      } },
+      opened_at: ago(40 * 60), closed_at: null,
+    },
+    /* ---------------- closed (auto-reconverged) ---------------- */
+    {
+      id: 90, rule_id: "HIGH", status: "closed", severity: "medium",
+      summary: "theatre: OR-1 pre-op imaging confirmed in the viewer.",
+      details: { kind: "high", key: "high/preop_imaging", distinct_values: ["confirmed"], per_source: {
+        pacs: [ev("pacs", "high", 5090, 9090, "study", "theatre: OR-1 pre-op imaging (PACS)", "confirmed", 1.0, "imaging imported and confirmed")],
       } },
       opened_at: ago(6 * 24 * 60), closed_at: ago(2 * 24 * 60),
     },
   ];
 }
 
-/* "Dealt with" folder → /api/findings/resolved */
 function buildResolved() {
   return [
-    { id: 80, rule_id: "UNOWNED", severity: "high" as const, summary: "Postdoc offboarding checklist ownership assigned before the move",
-      details: { kind: "move", key: "move/offboarding", distinct_values: ["assigned to Taylor"] },
-      opened_at: ago(4 * 24 * 60), resolved_at: ago(2 * 24 * 60), resolved_by: "Shan Siddiqi, MD" },
-    { id: 81, rule_id: "DEADLINE", severity: "medium" as const, summary: "R01 effort report submitted on eRA Commons",
-      details: { kind: "deadline", key: "deadline/effort_report", distinct_values: ["submitted"] },
-      opened_at: ago(5 * 24 * 60), resolved_at: ago(30 * 60), resolved_by: "Grants Administrator — Feinberg" },
-    { id: 82, rule_id: "NOT-LANDED", severity: "medium" as const, summary: "Summit registration link propagated to all co-organizers",
-      details: { kind: "landed", key: "landed/summit_reg", distinct_values: ["propagated"] },
-      opened_at: ago(6 * 24 * 60), resolved_at: ago(22 * 60), resolved_by: "Shan Siddiqi, MD" },
+    { id: 80, rule_id: "HIGH", severity: "high" as const, summary: "ICU bed for case 2 confirmed and accepted by the intensivist",
+      details: { kind: "high", key: "high/icu_bed", distinct_values: ["bed accepted"] },
+      opened_at: ago(4 * 24 * 60), resolved_at: ago(2 * 24 * 60), resolved_by: "Dr. Reyes — ICU Intensivist" },
+    { id: 81, rule_id: "PENDING", severity: "medium" as const, summary: "Pre-op checklist for OR-1 completed and confirmed with anaesthesia",
+      details: { kind: "pending", key: "pending/preop_checklist", distinct_values: ["complete"] },
+      opened_at: ago(5 * 24 * 60), resolved_at: ago(30 * 60), resolved_by: "Anaesthesiologist" },
+    { id: 82, rule_id: "REQUEST", severity: "medium" as const, summary: "Family goals-of-care conversation for Bed 5 documented with a named spokesperson",
+      details: { kind: "request", key: "request/family_update", distinct_values: ["documented"] },
+      opened_at: ago(6 * 24 * 60), resolved_at: ago(22 * 60), resolved_by: "Case Manager / Social Work" },
   ];
 }
 
-/* Investigation detail: flatten per_source into evidence[]; resolves live
- * findings AND resolved items so no demo link 404s. */
 function findingDetail(id: number) {
   const f = buildFindings().find((x) => x.id === id);
   if (f) {
@@ -292,7 +294,7 @@ function findingDetail(id: number) {
   }
   const r = buildResolved().find((x) => x.id === id);
   if (!r) return null;
-  const srcs = ["outlook", "redcap", "era"];
+  const srcs = ["epic", "pacs", "pager"];
   const evidence = (r.details.distinct_values ?? []).map((val, i) => ({
     role: "primary", claim_id: 5800 + id * 10 + i, kind: r.details.kind, key: r.details.key,
     value_norm: val, value: val, confidence: i === 0 ? 1.0 : 0.7,
@@ -317,16 +319,14 @@ function findingsSummary(all: Finding[]) {
 }
 
 const CONNECTIONS = [
-  { id: 1, source: "outlook", account_label: "Institutional Email & Calendar (Outlook)", artifact_count: 486 },
-  { id: 2, source: "slack", account_label: "Lab Slack — #lab-hiring · #tms-analysis", artifact_count: 213 },
-  { id: 3, source: "zoom", account_label: "Zoom — summit & collaborator syncs", artifact_count: 74 },
-  { id: 4, source: "redcap", account_label: "REDCap — trial data capture", artifact_count: 158 },
-  { id: 5, source: "era", account_label: "NIH eRA Commons — grant records", artifact_count: 61 },
-  { id: 6, source: "drive", account_label: "Shared Drive — analyses, SOPs, drafts", artifact_count: 132 },
+  { id: 1, source: "epic", account_label: "Epic (MGB eCare) — orders, in-basket, OpTime", artifact_count: 612 },
+  { id: 2, source: "pacs", account_label: "Visage 7 PACS + Nuance reads", artifact_count: 138 },
+  { id: 3, source: "orboard", account_label: "OR Board (OpTime) — sequencing & turnover", artifact_count: 94 },
+  { id: 4, source: "pager", account_label: "Secure Chat / paging", artifact_count: 203 },
+  { id: 5, source: "labs", account_label: "Beaker LIS — results & critical values", artifact_count: 156 },
+  { id: 6, source: "sched", account_label: "Cadence — OR & clinic scheduling", artifact_count: 61 },
 ];
 
-/** Resolve a demo payload for a server-side API path, or undefined to fall
- *  through to the live API (auth, mutations, anything not owned here). */
 export function demoJson(path: string): unknown | undefined {
   if (!DEMO_ENABLED) return undefined;
   const [p, q = ""] = path.split("?");
@@ -337,15 +337,13 @@ export function demoJson(path: string): unknown | undefined {
   if (p === "/api/graph/persons") return { persons: PERSONS };
   if (p === "/api/graph/people-projects") return { items: EDGES };
   if (p === "/api/graph/summary") {
-    return {
-      counts: { persons: PERSONS.length, projects: PROJECTS.length, artifacts: 971,
-        person_identities: 26, project_sources: 14, artifact_mentions: 1840, raw_pending_normalization: 0 },
-      last_raw_fetched_at: ago(6), last_normalized_at: ago(8),
-    };
+    return { counts: { persons: PERSONS.length, projects: PROJECTS.length, artifacts: 783,
+        person_identities: 22, project_sources: 14, artifact_mentions: 1610, raw_pending_normalization: 0 },
+      last_raw_fetched_at: ago(4), last_normalized_at: ago(6) };
   }
   if (p === "/api/agent/status") {
-    return { provider: "groq", model: "llama-3.3-70b-versatile", last_run_at: ago(12), last_ok_at: ago(12),
-      total_runs: 61, total_briefs: 130, in_progress: 0 };
+    return { provider: "groq", model: "llama-3.3-70b-versatile", last_run_at: ago(9), last_ok_at: ago(9),
+      total_runs: 96, total_briefs: 240, in_progress: 0 };
   }
   if (p === "/api/connections") return { items: CONNECTIONS };
   if (p === "/api/findings/summary") return findingsSummary(all);
@@ -362,10 +360,6 @@ export function demoJson(path: string): unknown | undefined {
   return undefined;
 }
 
-/**
- * Short-circuit the demo-owned mutations (mark "dealt with" / recall) so the
- * buttons on demo findings succeed instead of 404-ing against the live API.
- */
 export function demoMutation(path: string, method: string): Response | undefined {
   if (!DEMO_ENABLED || method.toUpperCase() !== "POST") return undefined;
   const p = path.split("?")[0];

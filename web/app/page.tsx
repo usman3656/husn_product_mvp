@@ -73,7 +73,7 @@ type Project = {
   scopes: { source: string; kind: string; id: string }[];
 };
 
-const SOURCE_LABEL: Record<string, string> = { slack: "Slack", google: "Google", microsoft: "Microsoft", email: "Email", outlook: "Email", calendar: "Calendar", zoom: "Zoom", redcap: "REDCap", irb: "IRB", drive: "Drive", era: "eRA Commons", ctms: "CTMS" };
+const SOURCE_LABEL: Record<string, string> = { epic: "Epic", pacs: "PACS", orboard: "OR Board", pager: "Secure Chat", labs: "Labs", sched: "Scheduling", slack: "Slack", email: "Email" };
 
 /* ------- derivations ------- */
 
@@ -249,11 +249,11 @@ export default async function Briefing() {
   const artifactCount = graphSummary?.counts?.artifacts ?? 0;
   const lastRun = statusRes?.last_run_at ?? null;
 
-  // Single-doctor demo (Dr. Siddiqi): a purpose-built home for a research PI —
-  // his action queue, not org-level vitals. Gated by the demo flag so the
-  // generic briefing below is untouched when the demo is off.
+  // Floor-surgeon demo: a purpose-built home for a surgeon working the floor —
+  // Emergencies / High priority / Pending / Requests, not org-level vitals.
+  // Gated by the demo flag so the generic briefing below is untouched when off.
   if (DEMO_ENABLED) {
-    return <ShanBriefing findings={findings} projects={projects} lastRun={lastRun} />;
+    return <FloorBriefing findings={findings} projects={projects} lastRun={lastRun} />;
   }
 
   // "Awaiting first sync" — no connections AND no artifacts. The agent cron
@@ -352,98 +352,120 @@ export default async function Briefing() {
 }
 
 /* =====================================================
-   ShanBriefing — the single-doctor (Dr. Siddiqi) home.
+   FloorBriefing — the floor-surgeon home.
    Replaces org-level vitals (Confidence/Alignment/Momentum/
-   Emerging Risks) with a research-PI's action queue, keyed to
-   his documented pain points: orphaned ownership from the
-   Brigham→Northwestern move, silently-stalled dependencies,
-   deadline blindness, and decisions that haven't propagated.
+   Emerging Risks) with the four things a surgeon asks between
+   cases, in order: Emergencies (act now), High priority (blocks
+   the next case), Pending tasks (what he owes), Requests (who's
+   waiting on him) — plus today's OR/rounds/family schedule.
    ===================================================== */
 
-function ShanBriefing({ findings, projects, lastRun }: { findings: Finding[]; projects: Project[]; lastRun: string | null }) {
+const SCHEDULE: { time: string; label: string; tag: string }[] = [
+  { time: "06:30", label: "Chart review + imaging for the list", tag: "Prep" },
+  { time: "07:00", label: "Team huddle — residents + charge nurse", tag: "Huddle" },
+  { time: "07:15", label: "Ward rounds — Beds 3, 9, 11, 12", tag: "Rounds" },
+  { time: "07:45", label: "ICU check — Bed 7 (post-op day 1)", tag: "ICU" },
+  { time: "08:00", label: "OR-1 — lap chole (case 1)", tag: "OR" },
+  { time: "09:30", label: "OR-2 — colon resection (case 2)", tag: "OR" },
+  { time: "11:30", label: "ED consult — query appendicitis", tag: "ED" },
+  { time: "12:00", label: "Family meeting — Bed 3 (goals of care)", tag: "Family" },
+  { time: "12:30", label: "Tumour board / MDT — colon case", tag: "MDT" },
+  { time: "14:00", label: "OR-3 — revised start (case 3)", tag: "OR" },
+  { time: "16:00", label: "Post-op clinic — follow-ups", tag: "Clinic" },
+  { time: "17:00", label: "Sign-out / PACU handoff", tag: "Sign-out" },
+];
+
+function ScheduleView() {
+  return (
+    <ul className="space-y-1.5">
+      {SCHEDULE.map((s, i) => (
+        <li key={i} className="flex items-baseline gap-4 rounded-[var(--radius)] border px-4 py-2.5" style={{ borderColor: "var(--border)", background: "var(--panel)" }}>
+          <span className="tabular text-[13px] font-semibold shrink-0" style={{ color: "var(--text)", minWidth: 46 }}>{s.time}</span>
+          <span className="flex-1 text-[14px]" style={{ color: "var(--text-2)" }}>{s.label}</span>
+          <span className="rounded-full border px-2 py-0.5 text-[10.5px] font-medium shrink-0" style={{ borderColor: "var(--border)", background: "var(--panel-2)", color: "var(--muted)" }}>{s.tag}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function FloorBriefing({ findings, projects, lastRun }: { findings: Finding[]; projects: Project[]; lastRun: string | null }) {
   const byCat = (c: string) => findings.filter((f) => f.rule_id === c).sort(byConsequence);
-  const needsYou = byCat("NEEDS-YOU");
-  const unowned = byCat("UNOWNED");
-  const blocked = byCat("BLOCKED");
-  const dueSoon = byCat("DEADLINE");
-  const notLanded = byCat("NOT-LANDED");
+  const emergencies = byCat("EMERGENCY");
+  const high = byCat("HIGH");
+  const pending = byCat("PENDING");
+  const requests = byCat("REQUEST");
 
   const slides: CarouselSlide[] = [
     {
-      id: "welcome", kicker: "01", title: "Welcome, Dr. Siddiqi", watermark: "Welcome", tone: "var(--accent)",
-      summary: "What moved, and what needs you today.",
+      id: "welcome", kicker: "01", title: "On the floor", watermark: "Today", tone: "var(--accent)",
+      summary: "Between cases — what's about to surprise you, and what's waiting.",
       node: (
         <div>
           <p className="husn-prose max-w-[68ch]" style={{ fontSize: 16.5 }}>
-            {shanGreeting({ blocked, dueSoon, unowned, needsYou })}
+            {floorGreeting({ emergencies, high, pending, requests })}
           </p>
-          <p className="husn-eyebrow mt-8 mb-3">Today, at a glance</p>
-          <PulseStrip data={shanMetrics({ blocked, dueSoon, unowned, notLanded })} />
+          <p className="husn-eyebrow mt-8 mb-3">Right now, at a glance</p>
+          <PulseStrip data={floorMetrics({ emergencies, high, pending, requests })} />
         </div>
       ),
     },
     {
-      id: "needs-you", kicker: "02", title: "Needs you", watermark: "You",
-      tone: needsYou.length ? "var(--conflict)" : "var(--aligned)",
-      summary: "The pending step is you — a call or sign-off no one else can make.",
-      node: <IssueList items={needsYou} projects={projects} reachable={false} empty="Nothing is waiting on your sign-off right now." />,
+      id: "emergencies", kicker: "02", title: "Emergencies", watermark: "Now",
+      tone: emergencies.length ? "var(--conflict)" : "var(--aligned)",
+      summary: "Act now — patient safety or the OR can't wait.",
+      node: <IssueList items={emergencies} projects={projects} empty="No emergencies right now." />,
     },
     {
-      id: "move", kicker: "03", title: "The move: still in transit", watermark: "Move", tone: "var(--predicted)",
-      summary: "Trials, grants, and handoffs from Brigham not yet claimed at Northwestern.",
-      node: <IssueList items={unowned} projects={projects} empty="Everything from the move has an owner." />,
+      id: "high", kicker: "03", title: "High priority", watermark: "Blocking",
+      tone: high.length ? "var(--conflict)" : "var(--aligned)",
+      summary: "Blocking your next case or decision.",
+      node: <IssueList items={high} projects={projects} empty="Nothing is blocking your next case." />,
     },
     {
-      id: "blocked", kicker: "04", title: "Stalled & waiting", watermark: "Blocked",
-      tone: blocked.length ? "var(--conflict)" : "var(--aligned)",
-      summary: "Dependencies sitting on one thing — a pending amendment, an unread analysis.",
-      node: <IssueList items={blocked} projects={projects} empty="Nothing is stalled on a single step." />,
+      id: "pending", kicker: "04", title: "Pending tasks", watermark: "You owe", tone: "var(--predicted)",
+      summary: "What you owe before the day gets away from you.",
+      node: <IssueList items={pending} projects={projects} empty="Nothing outstanding on your side." />,
     },
     {
-      id: "deadlines", kicker: "05", title: "Grants & deadlines", watermark: "Dates", tone: "var(--uncertain)",
-      summary: "K23, R01, R21, and the summit — every fixed date in the next two weeks.",
-      node: <IssueList items={dueSoon} projects={projects} empty="No hard deadlines in the next two weeks." />,
+      id: "requests", kicker: "05", title: "Requests", watermark: "Inbound", tone: "var(--understood)",
+      summary: "Inbound — consults, pages, scheduling, family.",
+      node: <IssueList items={requests} projects={projects} empty="No one is waiting on you right now." />,
     },
     {
-      id: "landed", kicker: "06", title: "Not yet landed", watermark: "Propagate", tone: "var(--understood)",
-      summary: "You decided it; the site or a collaborator hasn't caught up.",
-      node: <IssueList items={notLanded} projects={projects} empty="Every decision has propagated downstream." />,
+      id: "schedule", kicker: "06", title: "Today on the floor", watermark: "List", tone: "var(--accent)",
+      summary: "Your day — OR cases, rounds, and family meetings.",
+      node: <ScheduleView />,
     },
   ];
 
   return (
     <BriefingCarousel
       slides={slides}
-      title="Welcome, Dr. Siddiqi"
+      title="On the floor"
       dateLabel={todayHeadline()}
       refreshedLabel={timeAgo(lastRun)}
     />
   );
 }
 
-function shanGreeting(g: { blocked: Finding[]; dueSoon: Finding[]; unowned: Finding[]; needsYou: Finding[] }): string {
-  const parts: string[] = [];
-  if (g.needsYou.length) parts.push(`${g.needsYou.length} ${g.needsYou.length === 1 ? "item is" : "items are"} waiting on your call`);
-  if (g.blocked.length) parts.push(`${g.blocked.length} ${g.blocked.length === 1 ? "is" : "are"} blocked on a single pending step`);
-  if (g.dueSoon.length) parts.push(`${g.dueSoon.length} ${g.dueSoon.length === 1 ? "has" : "have"} a hard deadline inside two weeks`);
-  const lead = parts.length ? `TL;DR: ${parts.join(", ")}.` : "TL;DR: nothing is on fire.";
-  const orphan = g.unowned.length
-    ? ` ${g.unowned.length} ${g.unowned.length === 1 ? "item" : "items"} from the Brigham handoff still ${g.unowned.length === 1 ? "has" : "have"} no owner at Northwestern — pinned up top.`
-    : "";
-  return `Here's what moved. ${lead}${orphan} Everything below is ordered by what stalls if you don't touch it.`;
+function floorGreeting(g: { emergencies: Finding[]; high: Finding[]; pending: Finding[]; requests: Finding[] }): string {
+  const e = g.emergencies.length, h = g.high.length, p = g.pending.length, r = g.requests.length;
+  const lead = e ? `${e} ${e === 1 ? "emergency needs" : "emergencies need"} you now` : "nothing on fire right now";
+  return `Here's your floor. TL;DR: ${lead}, ${h} ${h === 1 ? "item is" : "items are"} blocking your next case, ${p} you owe, and ${r} ${r === 1 ? "person is" : "people are"} waiting on you. Emergencies first, then what stalls your next case.`;
 }
 
-function shanMetrics(g: { blocked: Finding[]; dueSoon: Finding[]; unowned: Finding[]; notLanded: Finding[] }): PulseDatum[] {
+function floorMetrics(g: { emergencies: Finding[]; high: Finding[]; pending: Finding[]; requests: Finding[] }): PulseDatum[] {
   const tile = (key: string, label: string, items: Finding[], tone: SemanticTone, caption: string, href: string): PulseDatum => ({
     key, label, kind: "text", value: String(items.length),
     tone: items.length ? tone : "aligned", caption, href,
     breakdown: items.slice(0, 4).map((f) => ({ label: f.severity, value: f.summary })),
   });
   return [
-    tile("blocked", "Blocked", g.blocked, "conflict", "Each is waiting on exactly one thing to move.", "/explore?lens=dependencies"),
-    tile("due", "Due soon", g.dueSoon, "uncertain", "Fixed dates. Missing one costs a cycle, not a day.", "/explore?lens=deadlines"),
-    tile("unowned", "Unowned", g.unowned, "predicted", "Orphaned by the move — each needs someone to hold it.", "/explore?lens=ownership"),
-    tile("landed", "Not yet landed", g.notLanded, "understood", "You decided it; the site hasn't caught up.", "/explore?lens=landed"),
+    tile("emergencies", "Emergencies", g.emergencies, "conflict", "Act now — safety or the OR can't wait.", "/explore?lens=emergencies"),
+    tile("high", "High priority", g.high, "uncertain", "Blocking your next case or decision.", "/explore?lens=high"),
+    tile("pending", "Pending tasks", g.pending, "predicted", "What you owe before the day gets away.", "/explore?lens=pending"),
+    tile("requests", "Requests", g.requests, "understood", "Inbound asks waiting on you.", "/explore?lens=requests"),
   ];
 }
 
@@ -459,20 +481,20 @@ function workstreamFor(f: Finding, projects: Project[]): string | null {
   return null;
 }
 
-function shanReachOut(f: Finding, ws: string | null): ReachOutContext {
+function floorReachOut(f: Finding, ws: string | null): ReachOutContext {
   const about = ws ?? "this";
-  const via: "slack" | "email" = Object.keys(f.details?.per_source ?? {}).includes("slack") ? "slack" : "email";
+  const via: "slack" | "email" = "slack"; // paging / secure-chat style
   switch (f.rule_id) {
-    case "UNOWNED":
-      return { who: "The likely owner", why: f.summary, about, draft: `Quick one on ${about}: who owns this at Northwestern now? Want to make sure it doesn't fall through the move.`, via };
-    case "BLOCKED":
-      return { who: "Whoever can clear it", why: f.summary, about, draft: `Can you take the one pending step here? ${about} is stalled on a single thing and I'd like to unblock it today.`, via };
-    case "DEADLINE":
-      return { who: "The owner + grants office", why: f.summary, about, draft: `Flagging a hard deadline on ${about}. Can we confirm who's driving it and that we're on track?`, via };
-    case "NOT-LANDED":
-      return { who: "The downstream site / collaborator", why: f.summary, about, draft: `Following up on ${about}: the change is decided on our end — can you confirm it's landed on yours?`, via };
+    case "EMERGENCY":
+      return { who: "The team on it", why: f.summary, about, draft: `Escalating now — need eyes on this immediately. Can you acknowledge and confirm the next step?`, via };
+    case "HIGH":
+      return { who: "Whoever can unblock it", why: f.summary, about, draft: `Before the next case: can you clear this? ${about} is holding up the list.`, via };
+    case "PENDING":
+      return { who: "The owner", why: f.summary, about, draft: `Closing the loop on ${about} — can you take the pending step so this doesn't slip today?`, via };
+    case "REQUEST":
+      return { who: "The requester", why: f.summary, about, draft: `Got your request on ${about}. Here's where I am — I'll confirm shortly.`, via };
     default:
-      return { who: "The likely owner", why: f.summary, about, draft: `Quick sync on ${about}?`, via };
+      return { who: "The team", why: f.summary, about, draft: `Quick coordination on ${about}?`, via };
   }
 }
 
@@ -512,7 +534,7 @@ function IssueCard({ f, projects, reachable }: { f: Finding; projects: Project[]
         </div>
       </div>
       <div className="mt-4 flex flex-wrap items-center gap-2 pl-6">
-        {reachable ? <ReachOutButton context={shanReachOut(f, ws)} size="sm" /> : null}
+        {reachable ? <ReachOutButton context={floorReachOut(f, ws)} size="sm" /> : null}
         <DealtWithButton findingId={f.id} size="sm" />
         <Link href={`/investigations/${f.id}`} className="text-[12.5px] font-medium" style={{ color: "var(--accent)" }}>Open →</Link>
       </div>
