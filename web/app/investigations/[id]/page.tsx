@@ -68,6 +68,11 @@ function timeAgo(iso: string): string {
 }
 
 function kindLabel(rule_id: string): string {
+  if (rule_id === "NEEDS-YOU") return "Needs you";
+  if (rule_id === "UNOWNED") return "Unowned — from the move";
+  if (rule_id === "BLOCKED") return "Stalled";
+  if (rule_id === "DEADLINE") return "Deadline";
+  if (rule_id === "NOT-LANDED") return "Not yet landed";
   if (rule_id === "R-DATE-1") return "Date conflict";
   if (rule_id === "R-OWNER-1") return "Ownership gap";
   if (rule_id === "R-STATUS-1") return "Status drift";
@@ -89,6 +94,24 @@ function reachOutContext(f: Finding): ReachOutContext {
   }
   const sourceList = sources.map((s) => SOURCE_LABEL[s] ?? s).join(" and ");
   const k = prettyKey(f.details?.key);
+  const via: "slack" | "email" = sources.includes("slack") ? "slack" : "email";
+
+  // Dr. Siddiqi (demo) categories — keep drafts consistent with the home page.
+  if (f.rule_id === "NEEDS-YOU") {
+    return { who: "You", why: f.summary, about: "Needs you", draft: "This one is yours to decide — no outreach needed.", via };
+  }
+  if (f.rule_id === "UNOWNED") {
+    return { who: "The likely owner", why: f.summary, about: "Unowned — from the move", draft: `Quick one: who owns this at Northwestern now? Want to make sure it doesn't fall through the move.`, via };
+  }
+  if (f.rule_id === "BLOCKED") {
+    return { who: "Whoever can clear it", why: f.summary, about: "Stalled", draft: `Can you take the one pending step here? This is stalled on a single thing and I'd like to unblock it today.`, via };
+  }
+  if (f.rule_id === "DEADLINE") {
+    return { who: "The owner + grants office", why: f.summary, about: "Deadline", draft: `Flagging a hard deadline here. Can we confirm who's driving it and that we're on track?`, via };
+  }
+  if (f.rule_id === "NOT-LANDED") {
+    return { who: "The downstream site / collaborator", why: f.summary, about: "Not yet landed", draft: `Following up: the change is decided on our end — can you confirm it's landed on yours?`, via };
+  }
 
   if (f.rule_id === "R-DATE-1") {
     return {

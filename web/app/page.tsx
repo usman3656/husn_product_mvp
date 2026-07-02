@@ -441,17 +441,20 @@ function shanMetrics(g: { blocked: Finding[]; dueSoon: Finding[]; unowned: Findi
   });
   return [
     tile("blocked", "Blocked", g.blocked, "conflict", "Each is waiting on exactly one thing to move.", "/explore?lens=dependencies"),
-    tile("due", "Due soon", g.dueSoon, "uncertain", "Fixed dates. Missing one costs a cycle, not a day.", "/explore?lens=risks"),
-    tile("unowned", "Unowned", g.unowned, "predicted", "Orphaned by the move — each needs someone to hold it.", "/organization"),
-    tile("landed", "Not yet landed", g.notLanded, "understood", "You decided it; the site hasn't caught up.", "/explore?lens=risks"),
+    tile("due", "Due soon", g.dueSoon, "uncertain", "Fixed dates. Missing one costs a cycle, not a day.", "/explore?lens=deadlines"),
+    tile("unowned", "Unowned", g.unowned, "predicted", "Orphaned by the move — each needs someone to hold it.", "/explore?lens=ownership"),
+    tile("landed", "Not yet landed", g.notLanded, "understood", "You decided it; the site hasn't caught up.", "/explore?lens=landed"),
   ];
 }
 
-/* Which workstream (project) an issue belongs to — by slug in evidence titles. */
+/* Which workstream (project) an issue belongs to — by slug in evidence titles.
+ * Word-boundary match so a slug never matches inside another token
+ * (e.g. "tms" must not match inside "ctms"). */
 function workstreamFor(f: Finding, projects: Project[]): string | null {
-  const titles = Object.values(f.details?.per_source ?? {}).flat().map((e) => e.artifact_title ?? "");
+  const titles = Object.values(f.details?.per_source ?? {}).flat().map((e) => (e.artifact_title ?? "").toLowerCase());
   for (const p of projects) {
-    if (titles.some((t) => t.toLowerCase().includes(p.slug.toLowerCase()))) return p.name;
+    const re = new RegExp(`\\b${p.slug.toLowerCase()}\\b`);
+    if (titles.some((t) => re.test(t))) return p.name;
   }
   return null;
 }

@@ -39,15 +39,17 @@ type Person = { id: number; primary_name: string | null; primary_email: string |
 
 const SOURCE_LABEL: Record<string, string> = { slack: "Slack", google: "Google", microsoft: "Microsoft", email: "Email", outlook: "Email", calendar: "Calendar", zoom: "Zoom", redcap: "REDCap", irb: "IRB", drive: "Drive", era: "eRA Commons", ctms: "CTMS" };
 
-type Lens = "projects" | "teams" | "risks" | "ownership" | "dependencies" | "decisions" | "resolved";
+type Lens = "projects" | "teams" | "risks" | "ownership" | "dependencies" | "decisions" | "deadlines" | "landed" | "resolved";
 
 const LENSES: { key: Lens; label: string; tagline: string }[] = [
   { key: "projects", label: "Workstreams", tagline: "The move, the trials, the grants, the summit, and hiring." },
   { key: "teams", label: "Collaborators", tagline: "Your lab and the people you coordinate with." },
   { key: "risks", label: "Open items", tagline: "Everything currently in motion, ranked by what stalls first." },
+  { key: "decisions", label: "Needs you", tagline: "The pending step is you — a call or a sign-off." },
   { key: "ownership", label: "Unowned", tagline: "Orphaned by the Brigham → Northwestern move." },
   { key: "dependencies", label: "Stalled", tagline: "Waiting on one pending step to move." },
-  { key: "decisions", label: "Needs you", tagline: "The pending step is you — a call or a sign-off." },
+  { key: "deadlines", label: "Due soon", tagline: "Hard dates in the next two weeks — grants, IRB, the summit." },
+  { key: "landed", label: "Not yet landed", tagline: "Decided on your end; the site or a collaborator hasn't caught up." },
   { key: "resolved", label: "Resolved", tagline: "Items you've marked as dealt with — kept here, not deleted, and recallable." },
 ];
 
@@ -130,6 +132,8 @@ export default async function ExplorePage({ searchParams }: { searchParams: Prom
         {lens === "ownership" ? <FindingsLens items={open.filter((f) => f.rule_id === "UNOWNED").sort(byConsequence)} hint="Items orphaned by the move — no owner at Northwestern yet." /> : null}
         {lens === "dependencies" ? <DependenciesLens items={open.filter((f) => f.rule_id === "BLOCKED")} /> : null}
         {lens === "decisions" ? <FindingsLens items={open.filter((f) => f.rule_id === "NEEDS-YOU").sort(byConsequence)} hint="The pending step is you — a call, an approval, a sign-off no one else can make." /> : null}
+        {lens === "deadlines" ? <FindingsLens items={open.filter((f) => f.rule_id === "DEADLINE").sort(byConsequence)} hint="Fixed dates in the next two weeks. Missing one costs a cycle, not a day." /> : null}
+        {lens === "landed" ? <FindingsLens items={open.filter((f) => f.rule_id === "NOT-LANDED").sort(byConsequence)} hint="You decided it; the site or a collaborator hasn't caught up." /> : null}
         {lens === "resolved" ? <ResolvedLens items={resolved} /> : null}
       </section>
     </main>

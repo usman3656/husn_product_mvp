@@ -153,7 +153,7 @@ function buildFindings(): Finding[] {
       id: 104, rule_id: "UNOWNED", status: "open", severity: "high",
       summary: "NCT02980484 still lists Brigham as site of record while the lab relocates — the PI-of-record handoff is unconfirmed.",
       details: { kind: "move", key: "move/site_record", distinct_values: ["Brigham site of record", "Northwestern pending"], per_source: {
-        ctms: [ev("ctms", "move", 5107, 9107, "study", "tbi — CTMS site record", "Brigham site of record", 1.0, "site of record: Brigham and Women's")],
+        ctms: [ev("ctms", "move", 5107, 9107, "study", "tbi — study site record", "Brigham site of record", 1.0, "site of record: Brigham and Women's")],
         outlook: [ev("outlook", "move", 5108, 9108, "email", "tbi — site transfer thread (Email)", "Northwestern pending", 0.7, "transfer to Feinberg discussed, not yet filed")],
       } },
       opened_at: ago(28 * 60), closed_at: null,
